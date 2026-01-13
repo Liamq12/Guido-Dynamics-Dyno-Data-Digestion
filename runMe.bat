@@ -1,0 +1,33 @@
+@echo off
+setlocal ENABLEEXTENSIONS
+
+rem --- Get current folder ---
+set SCRIPT_DIR=%~dp0
+cd /d "%SCRIPT_DIR%"
+
+echo Welcome to Team Guido Dynamics!
+echo Starting Services...
+
+rem --- Start InfluxDB and Grafana in separate windows ---
+start "" "%SCRIPT_DIR%influxdb2-2.7.12-windows\influxd.exe"
+start "" "%ProgramFiles%\GrafanaLabs\grafana\bin\grafana-server.exe" --config="%ProgramFiles%\GrafanaLabs\grafana\conf\grafana.ini" --homepath="%ProgramFiles%\GrafanaLabs\grafana"
+
+rem --- Start Python script ---
+echo Starting UPD Ingest...
+start "MY_PYTHON_SCRIPT" python "%SCRIPT_DIR%main.py"
+
+echo All processes started. Press any key to stop them...
+pause
+
+rem --- Cleanup routine ---
+echo Stopping Python script...
+taskkill /IM python.exe /F
+
+echo Stopping Grafana...
+taskkill /IM grafana-server.exe /F /T
+
+echo Stopping InfluxDB...
+taskkill /IM influxd.exe /F
+
+echo Cleanup complete.
+exit /b

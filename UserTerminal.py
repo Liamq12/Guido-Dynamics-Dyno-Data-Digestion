@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+"""
+Terminal Interface (htop-style)
+Cross-platform terminal UI using rich library
+
+Install: pip install rich
+Run: python terminal_interface.py
+"""
+
+import time
+import random
+import json
+import os
+from tkinter import Tk, filedialog
+from datetime import datetime, timedelta
+from rich.console import Console
+from rich.layout import Layout
+from rich.panel import Panel
+from rich.table import Table
+from rich.progress import BarColumn, Progress, TextColumn
+from rich.live import Live
+from rich.text import Text
+
+class TerminalInterface:
+    def __init__(self):
+        self.console = Console()
+        self.active_tab = 0
+        self.tabs = ['SYSTEM', 'PROCESSES', 'NETWORK', 'DISK', 'GEAR SYNCH', 'CONTROLS']
+        self.cpu_count = 8
+        self.input_value = ""
+        self.submitted_value = None
+        self.selected_button = 0
+        self.button_labels = ['Start', 'Stop', 'Restart', 'Load Configuration File', 'Exit']
+        self.button_status = ""
+        self.json_file_path = None
+        self.json_data = None
+        self.json_error = None
+        self.start_time = datetime.now() # - timedelta(days=3, hours=12, minutes=45)
+
+        self.gear_ratio = 0
+        
+        # Initialize data
+        self.cpu_data = [0] * self.cpu_count
+        self.mem_used = 8000
+        self.mem_total = 16384
+        self.processes = []
+        self.running = True
+        
+    def get_color(self, value):
+        """Return color based on value"""
+        if value < 30:
+            return "green"
+        elif value < 70:
+            return "yellow"
+        else:
+            return "red"
+    
+    def create_bar(self, value, max_val, width=30):
+        """Create a text-based progress bar"""
+        filled = int((value / max_val) * width)
+        percentage = int((value / max_val) * 100)
+        bar = "█" * filled + "░" * (width - filled)
+        color = self.get_color(percentage)
+        return f"[{color}]{bar}[/{color}] [{color}]{percentage:3d}%[/{color}]"
+    
+    def make_header(self):
+        """Create header panel"""
+        now = datetime.now()
+        uptime = now - self.start_time
+        
+        header_text = Text()
+        header_text.append("Guido Dyno Terminal", style="bold white")
+        header_text.append(" v2.1.0", style="green")
+        header_text.append(f"\n{now.strftime('%H:%M:%S')} | ", style="green")
+        header_text.append(f"Uptime: {uptime.days}d {uptime.seconds//3600}h {(uptime.seconds//60)%60}m", style="green")
+        
+        return Panel(header_text, style="green")
+    
+    def make_menu(self):
+        """Create menu bar"""
+        menu_parts = []
+        for i, tab in enumerate(self.tabs):
+            if i == self.active_tab:
+                menu_parts.append(f"[black on green] F{i+1} {tab} [/black on green]")
+            else:
+                menu_parts.append(f"[green] F{i+1} {tab} [/green]")
+        
+        menu_text = "  ".join(menu_parts)
+        return Panel(menu_text, style="green")
+    
+    def make_system_tab(self):
+        """Create system information view"""
+        content = []
+        
+        # CPU Section
+        content.append("[bold white]CPU Usage:[/bold white]\n")
+        for i, cpu in enumerate(self.cpu_data):
+            bar = self.create_bar(cpu, 100, 40)
+            content.append(f"  CPU{i}  {bar}")
+        
+        content.append("\n[bold white]Memory:[/bold white]")
+        mem_bar = self.create_bar(self.mem_used, self.mem_total, 40)
+        content.append(f"  MEM   {mem_bar}  [green]{self.mem_used}MB / {self.mem_total}MB[/green]")
+        
+        content.append("\n[bold white]Load Average:[/bold white]")
+        content.append("  [green]1 min: 2.45 | 5 min: 1.98 | 15 min: 1.67[/green]")
+        
+        return Panel("\n".join(content), title="System", style="green")
+    
+    def make_processes_tab(self):
+        """Create process list view"""
+        table = Table(show_header=True, header_style="bold black on green", border_style="green")
+        table.add_column("PID", width=8)
+        table.add_column("NAME", width=16)
+        table.add_column("CPU%", justify="right", width=8)
+        table.add_column("MEM(MB)", justify="right", width=10)
+        table.add_column("TIME", justify="right", width=10)
+        
+        for proc in self.processes[:12]:
+            color = self.get_color(proc['cpu'])
+            table.add_row(
+                str(proc['pid']),
+                proc['name'],
+                f"[{color}]{proc['cpu']}%[/{color}]",
+                f"{proc['mem']}",
+                proc['time']
+            )
+        
+        return Panel(table, title="Top Processes by CPU", style="green")
+    
+    def make_network_tab(self):
+        """Create network information view"""
+        content = []
+        
+        content.append("[bold white]Network Interfaces:[/bold white]\n")
+        
+        # eth0
+        content.append("[green]eth0: 192.168.1.100[/green]")
+        rx_speed = random.randint(50, 80)
+        tx_speed = random.randint(30, 60)
+        content.append(f"  RX: {self.create_bar(rx_speed, 100, 30)}  [green]{rx_speed} Mbps[/green]")
+        content.append(f"  TX: {self.create_bar(tx_speed, 100, 30)}  [green]{tx_speed} Mbps[/green]")
+        
+        content.append("\n[green]wlan0: 10.0.0.25[/green]")
+        rx_speed = random.randint(15, 35)
+        tx_speed = random.randint(10, 25)
+        content.append(f"  RX: {self.create_bar(rx_speed, 100, 30)}  [green]{rx_speed} Mbps[/green]")
+        content.append(f"  TX: {self.create_bar(tx_speed, 100, 30)}  [green]{tx_speed} Mbps[/green]")
+        
+        return Panel("\n".join(content), title="Network", style="green")
+    
+    def make_buttons_tab(self):
+        """Create buttons/menu view"""
+        content = []
+        
+        content.append("[bold white]Button Menu[/bold white]\n")
+        content.append("[green]Use LEFT/RIGHT arrow keys to select, ENTER to activate[/green]\n\n")
+        
+        # Display buttons
+        button_line = "  "
+        for i, label in enumerate(self.button_labels):
+            if i == self.selected_button:
+                button_line += f"[black on cyan] [ {label} ] [/black on cyan]  "
+            else:
+                button_line += f"[cyan][ {label} ][/cyan]  "
+        
+        content.append(button_line)
+        content.append("\n")
+        
+        # Show button status
+        if self.button_status:
+            content.append(f"\n[bold yellow]Action:[/bold yellow] {self.button_status}\n")
+        else:
+            content.append("\n[dim]No action performed yet[/dim]\n")
+        
+        # Button descriptions
+        content.append("\n[bold white]Button Descriptions:[/bold white]")
+        content.append("[green]Start[/green]     - Initialize the system")
+        content.append("[green]Stop[/green]      - Halt all processes")
+        content.append("[green]Restart[/green]   - Reboot the system")
+        content.append("[green]Configure[/green] - Open configuration menu")
+        content.append("[green]Exit[/green]      - Close application")
+        
+        return Panel("\n".join(content), title="Buttons", style="green")
+    
+    def open_file_dialog(self):
+        """Open file dialog to select JSON file"""
+        try:
+            # Create a hidden Tkinter root window
+            root = Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            
+            self.button_status = f'Selecting File'
+
+            # Open file dialog
+            file_path = filedialog.askopenfilename(
+                title="Select a JSON file",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+
+            root.update()
+            root.destroy()
+            
+            if file_path:
+                self.json_file_path = file_path
+                self.json_error = None
+                
+                # Read and parse JSON file
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        self.json_data = json.load(f)
+                except json.JSONDecodeError as e:
+                    self.json_error = f"Invalid JSON: {e}"
+                    self.json_data = None
+                except Exception as e:
+                    self.json_error = f"Error reading file: {e}"
+                    self.json_data = None
+        except Exception as e:
+            self.json_error = f"Error opening dialog: {e}"
+
+    def load_config_file(self):
+        self.button_status = self.json_data.get("Gear Ratio")
+
+    def make_input_tab(self):
+        """Create input form view"""
+        content = []
+        
+        content.append("[bold white]Number Input Form[/bold white]\n")
+        content.append("[green]Enter a numeric value below:[/green]\n")
+        
+        # Input field display
+        input_display = f"[cyan]> {self.input_value}_[/cyan]" if len(self.input_value) < 20 else f"[cyan]> {self.input_value}[/cyan]"
+        content.append(f"  {input_display}\n")
+        
+        # Instructions
+        content.append("[yellow]Type numbers (0-9), Backspace to delete, Enter to submit[/yellow]\n")
+        
+        # Show submitted value
+        if self.submitted_value is not None:
+            content.append(f"\n[bold green]Last Submitted Value: {self.submitted_value}[/bold green]")
+            content.append(f"[green]Value squared: {self.submitted_value ** 2}[/green]")
+            content.append(f"[green]Value doubled: {self.submitted_value * 2}[/green]")
+        else:
+            content.append("\n[dim]No value submitted yet[/dim]")
+        
+        return Panel("\n".join(content), title="Input", style="green")
+    
+    def make_disk_tab(self):
+        """Create disk information view"""
+        content = []
+        
+        content.append("[bold white]Disk Usage:[/bold white]\n")
+        
+        # /dev/sda1
+        content.append("[green]/dev/sda1 mounted on /[/green]")
+        content.append(f"  {self.create_bar(456, 512, 40)}  [green]456GB / 512GB (89%)[/green]")
+        
+        content.append("\n[green]/dev/sdb1 mounted on /home[/green]")
+        content.append(f"  {self.create_bar(789, 1024, 40)}  [green]789GB / 1024GB (77%)[/green]")
+        
+        return Panel("\n".join(content), title="Disk", style="green")
+    
+    def make_footer(self):
+        """Create footer panel"""
+        footer_text = "[green]F1:System F2:Processes F3:Network F4:Disk F5:Input F6:Buttons | Q:Quit[/green]"
+        return Panel(footer_text, style="green")
+    
+    def update_data(self):
+        """Update simulated data"""
+        # Update CPU data
+        self.cpu_data = [random.randint(0, 100) for _ in range(self.cpu_count)]
+        
+        # Update memory
+        self.mem_used = 8000 + random.randint(0, 4000)
+        
+        # Update processes
+        process_names = ['node', 'python', 'docker', 'postgres', 'nginx', 
+                        'redis', 'chrome', 'vscode', 'systemd', 'bash',
+                        'ssh', 'apache2', 'mysql', 'git', 'npm']
+        self.processes = [
+            {
+                'pid': 1000 + i,
+                'name': name,
+                'cpu': random.randint(0, 100),
+                'mem': random.randint(100, 2048),
+                'time': f"{random.randint(0, 59)}:{random.randint(0, 59):02d}"
+            }
+            for i, name in enumerate(process_names)
+        ]
+        self.processes.sort(key=lambda x: x['cpu'], reverse=True)
+    
+    def make_layout(self):
+        """Create the layout"""
+        layout = Layout()
+        
+        layout.split_column(
+            Layout(name="header", size=4),
+            Layout(name="menu", size=3),
+            Layout(name="content"),
+            Layout(name="footer", size=3)
+        )
+        
+        layout["header"].update(self.make_header())
+        layout["menu"].update(self.make_menu())
+        layout["footer"].update(self.make_footer())
+        
+        # Content based on active tab
+        if self.active_tab == 0:
+            layout["content"].update(self.make_system_tab())
+        elif self.active_tab == 1:
+            layout["content"].update(self.make_processes_tab())
+        elif self.active_tab == 2:
+            layout["content"].update(self.make_network_tab())
+        elif self.active_tab == 3:
+            layout["content"].update(self.make_disk_tab())
+        elif self.active_tab == 4:
+            layout["content"].update(self.make_input_tab())
+        elif self.active_tab == 5:
+            layout["content"].update(self.make_buttons_tab())
+        
+        return layout
+    
+    def run(self):
+        """Main loop with Live display"""
+        print("[green]Terminal Interface - Press Q to quit[/green]")
+        print("[green]Use F1-F6 to switch tabs[/green]")
+        print("\nStarting in 2 seconds...")
+        time.sleep(2)
+        
+        try:
+            import threading
+            import sys
+            
+            def input_thread():
+                """Background thread for keyboard input"""
+                while self.running:
+                    try:
+                        if sys.platform == 'win32':
+                            import msvcrt
+                            if msvcrt.kbhit():
+                                key = msvcrt.getch()
+                                
+                                # Check for function keys (F1-F5) on Windows
+                                if key == b'\x00' or key == b'\xe0':  # Extended key prefix
+                                    extended = msvcrt.getch()
+                                    if extended == b';':  # F1
+                                        self.active_tab = 0
+                                    elif extended == b'<':  # F2
+                                        self.active_tab = 1
+                                    elif extended == b'=':  # F3
+                                        self.active_tab = 2
+                                    elif extended == b'>':  # F4
+                                        self.active_tab = 3
+                                    elif extended == b'?':  # F5
+                                        self.active_tab = 4
+                                    elif extended == b'@':  # F6
+                                        self.active_tab = 5
+                                    elif extended == b'K':  # Left arrow
+                                        if self.active_tab == 5:
+                                            self.selected_button = (self.selected_button - 1) % len(self.button_labels)
+                                    elif extended == b'M':  # Right arrow
+                                        if self.active_tab == 5:
+                                            self.selected_button = (self.selected_button + 1) % len(self.button_labels)
+                                # Handle special keys
+                                elif key == b'\r':  # Enter
+                                    if self.active_tab == 4 and self.input_value:
+                                        try:
+                                            self.submitted_value = int(self.input_value)
+                                            self.input_value = ""
+                                        except ValueError:
+                                            pass
+                                    elif self.active_tab == 5:  # Buttons tab
+                                        self.button_status = f"Button '{self.button_labels[self.selected_button]}' pressed!"
+                                        if(self.button_status == f"Button \'Load Configuration File\' pressed!"):
+                                            self.button_status = f'MASHALLAH1'
+                                            self.open_file_dialog()
+                                            self.button_status = f'MASHALLAH2'
+                                            self.load_config_file()
+                                elif key == b'\x08':  # Backspace
+                                    if self.active_tab == 4:
+                                        self.input_value = self.input_value[:-1]
+                                else:
+                                    try:
+                                        char = key.decode('utf-8').lower()
+                                        if char == 'q':
+                                            self.running = False
+                                        elif self.active_tab == 4 and char.isdigit():
+                                            self.input_value += char
+                                    except:
+                                        pass
+                        else:
+                            # # Unix-like systems
+                            # import select
+                            # import tty
+                            # import termios
+                            
+                            # old_settings = termios.tcgetattr(sys.stdin)
+                            # try:
+                            #     tty.setcbreak(sys.stdin.fileno())
+                            #     if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #         key = sys.stdin.read(1)
+                                    
+                            #         # Check for escape sequences (function keys)
+                            #         if key == '\x1b':  # ESC character
+                            #             # Read the next character
+                            #             if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                 next_char = sys.stdin.read(1)
+                            #                 if next_char == 'O':  # Function key sequence
+                            #                     if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                         func_key = sys.stdin.read(1)
+                            #                         if func_key == 'P':  # F1
+                            #                             self.active_tab = 0
+                            #                         elif func_key == 'Q':  # F2
+                            #                             self.active_tab = 1
+                            #                         elif func_key == 'R':  # F3
+                            #                             self.active_tab = 2
+                            #                         elif func_key == 'S':  # F4
+                            #                             self.active_tab = 3
+                            #                 elif next_char == '[':  # Alternative F-key sequence
+                            #                     if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                         func_seq = sys.stdin.read(1)
+                            #                         if func_seq == '1':
+                            #                             if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                                 end = sys.stdin.read(1)
+                            #                                 if end == '5':  # F5
+                            #                                     if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                                         sys.stdin.read(1)  # Read the final ~
+                            #                                     self.active_tab = 4
+                            #                         elif func_seq == '1':
+                            #                             if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                                 end = sys.stdin.read(1)
+                            #                                 if end == '7':  # F6
+                            #                                     if select.select([sys.stdin], [], [], 0.1)[0]:
+                            #                                         sys.stdin.read(1)  # Read the final ~
+                            #                                     self.active_tab = 5
+                            #                         elif func_seq == 'D':  # Left arrow
+                            #                             if self.active_tab == 5:
+                            #                                 self.selected_button = (self.selected_button - 1) % len(self.button_labels)
+                            #                         elif func_seq == 'C':  # Right arrow
+                            #                             if self.active_tab == 5:
+                            #                                 self.selected_button = (self.selected_button + 1) % len(self.button_labels)
+                            #         elif key == '\r' or key == '\n':  # Enter
+                            #             if self.active_tab == 4 and self.input_value:
+                            #                 try:
+                            #                     self.submitted_value = int(self.input_value)
+                            #                     self.input_value = ""
+                            #                 except ValueError:
+                            #                     pass
+                            #             elif self.active_tab == 5:  # Buttons tab
+                            #                 self.button_status = f"Button '{self.button_labels[self.selected_button]}' pressed!"
+                            #         elif key == '\x7f' or key == '\x08':  # Backspace
+                            #             if self.active_tab == 4:
+                            #                 self.input_value = self.input_value[:-1]
+                            #         elif key.lower() == 'q':
+                            #             self.running = False
+                            #         elif self.active_tab == 4 and key.isdigit():
+                            #             self.input_value += key
+                            # finally:
+                            #     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                            print("not used")
+                    except:
+                        pass
+                    time.sleep(0.1)
+            
+            # Start input thread
+            input_t = threading.Thread(target=input_thread, daemon=True)
+            input_t.start()
+            
+            # Main display loop
+            with Live(self.make_layout(), refresh_per_second=10, screen=True) as live:
+                while self.running:
+                    self.update_data()
+                    live.update(self.make_layout())
+        
+        except KeyboardInterrupt:
+            pass
+        
+        self.console.print("\n[green]Interface closed.[/green]")
+
+if __name__ == "__main__":
+    app = TerminalInterface()
+    app.run()
