@@ -11,6 +11,7 @@ import time
 import random
 import json
 import os
+from influxdb_client import InfluxDBClient, Point, WriteOptions
 from tkinter import Tk, filedialog
 from datetime import datetime, timedelta
 from rich.console import Console
@@ -36,6 +37,15 @@ class TerminalInterface:
         self.json_data = None
         self.json_error = None
         self.start_time = datetime.now() # - timedelta(days=3, hours=12, minutes=45)
+
+        # ---------- InfluxDB Setup ----------
+        self.INFLUX_URL = "http://localhost:8086"
+        self.TOKEN = "oWfIXrWjWZvTSD9d54G7mIWVxd8pqhSlrV98CA6I3aDXh86_g1U9_n4VKMdUpNEeevFkfKlsSjeS0XTJLphRbw=="
+        self.ORG = "Me"
+        self.BUCKET = "Test1"
+
+        self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+        self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
 
         self.gear_ratio = 0
         
@@ -220,7 +230,30 @@ class TerminalInterface:
             self.json_error = f"Error opening dialog: {e}"
 
     def load_config_file(self):
-        self.button_status = self.json_data.get("Gear Ratio")
+        try:
+            # Construct InfluxDB point Name
+            self.point = (
+                Point("ConfigName")
+                .tag("device", "CMD")
+                .tag("unit", "Text")
+                .field("value_str", self.json_data.get("Name"))
+            )
+
+            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=self.point)
+
+            # Construct InfluxDB point Gear Ratio
+            self.point = (
+                Point("GearRatio")
+                .tag("device", "CMD")
+                .tag("unit", "Text")
+                .field("value", self.json_data.get("Gear Ratio"))
+            )
+
+            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=self.point)
+
+        except Exception as e:
+            print("Error parsing packet:", e)
+            self.button_status = (f"Error parsing packet:", e)
 
     def make_input_tab(self):
         """Create input form view"""
@@ -377,6 +410,7 @@ class TerminalInterface:
                                             self.open_file_dialog()
                                             self.button_status = f'MASHALLAH2'
                                             self.load_config_file()
+                                            # self.button_status = f'MASHALLAH3'
                                 elif key == b'\x08':  # Backspace
                                     if self.active_tab == 4:
                                         self.input_value = self.input_value[:-1]

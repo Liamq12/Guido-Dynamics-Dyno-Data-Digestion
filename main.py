@@ -41,7 +41,7 @@ while True:
 
     # Parse the data list
     data_list = parsed.get("data", [])
-
+    
     for entry in data_list:
         metric = entry.get("metric")
         timestamp = entry.get("time")

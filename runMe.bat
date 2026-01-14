@@ -13,8 +13,12 @@ start "" "%SCRIPT_DIR%influxdb2-2.7.12-windows\influxd.exe"
 start "" "%ProgramFiles%\GrafanaLabs\grafana\bin\grafana-server.exe" --config="%ProgramFiles%\GrafanaLabs\grafana\conf\grafana.ini" --homepath="%ProgramFiles%\GrafanaLabs\grafana"
 
 rem --- Start Python script ---
-echo Starting UPD Ingest...
-start "MY_PYTHON_SCRIPT" python "%SCRIPT_DIR%main.py"
+echo Starting UDP Ingest...
+start "UDP Ingest" python "%SCRIPT_DIR%main.py"
+
+echo Starting User Terminal...
+rem start "UserTerminal" python "%SCRIPT_DIR%UserTerminal.py"
+explorer.exe "%SCRIPT_DIR%start_terminal.bat"
 
 echo All processes started. Press any key to stop them...
 pause
