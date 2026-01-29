@@ -17,6 +17,7 @@ python -m pip install tkinter
 
 rem --- Start InfluxDB and Grafana in separate windows ---
 start "" "%SCRIPT_DIR%influxdb2-2.7.12-windows\influxd.exe"
+copy /Y "%SCRIPT_DIR%grafana.ini" "%ProgramFiles%\GrafanaLabs\grafana\conf\grafana.ini"
 start "" "%ProgramFiles%\GrafanaLabs\grafana\bin\grafana-server.exe" --config="%ProgramFiles%\GrafanaLabs\grafana\conf\grafana.ini" --homepath="%ProgramFiles%\GrafanaLabs\grafana"
 
 rem --- Start Python script ---
