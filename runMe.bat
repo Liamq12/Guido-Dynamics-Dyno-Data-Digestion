@@ -10,6 +10,9 @@ echo Starting Services...
 
 net stop grafana
 
+rem -- Make sure user has influx db 
+python3 -m pip install influxdb-client
+
 rem --- Start InfluxDB and Grafana in separate windows ---
 start "" "%SCRIPT_DIR%influxdb2-2.7.12-windows\influxd.exe"
 start "" "%ProgramFiles%\GrafanaLabs\grafana\bin\grafana-server.exe" --config="%ProgramFiles%\GrafanaLabs\grafana\conf\grafana.ini" --homepath="%ProgramFiles%\GrafanaLabs\grafana"
