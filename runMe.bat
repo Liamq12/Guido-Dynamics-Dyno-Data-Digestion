@@ -8,6 +8,8 @@ cd /d "%SCRIPT_DIR%"
 echo Welcome to Team Guido Dynamics!
 echo Starting Services...
 
+net stop grafana
+
 rem --- Start InfluxDB and Grafana in separate windows ---
 start "" "%SCRIPT_DIR%influxdb2-2.7.12-windows\influxd.exe"
 start "" "%ProgramFiles%\GrafanaLabs\grafana\bin\grafana-server.exe" --config="%ProgramFiles%\GrafanaLabs\grafana\conf\grafana.ini" --homepath="%ProgramFiles%\GrafanaLabs\grafana"

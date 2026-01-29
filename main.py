@@ -4,6 +4,10 @@ from influxdb_client import InfluxDBClient, Point, WriteOptions
 UDP_IP = "192.168.0.2"
 UDP_PORT = 7
 
+# Temp calculation constants
+loadcellZero = 1.660
+loadcellTF = 0.00242304803289 # Volts per lbf
+
 # Create UDP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -28,7 +32,7 @@ while True:
     print(f"Received from {addr}: {data.decode(errors='replace')}")
     
     # Parse JSON into a Python dictionary
-    parsed = json.loads(data.decode(errors='replace'))
+    parsed = json.loads(data.decode(errors='replace').replace(':inf', ':null'))
 
     # Extract top-level fields
     name = parsed.get("name")
@@ -41,12 +45,18 @@ while True:
 
     # Parse the data list
     data_list = parsed.get("data", [])
-    
+
     for entry in data_list:
         metric = entry.get("metric")
         timestamp = entry.get("time")
         unit = entry.get("unit")
         value = entry.get("value")
+        if(value == None):
+            value = -1
+
+        # Delete this shit once we have a better solution:
+        if(metric == "dynoLoad"):
+            value = (value-loadcellZero) * (1/loadcellTF)
 
         try:
             # Construct InfluxDB point
