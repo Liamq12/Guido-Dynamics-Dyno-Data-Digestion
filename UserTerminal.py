@@ -406,9 +406,9 @@ class TerminalInterface:
                                     elif self.active_tab == 5:  # Buttons tab
                                         self.button_status = f"Button '{self.button_labels[self.selected_button]}' pressed!"
                                         if(self.button_status == f"Button \'Load Configuration File\' pressed!"):
-                                            self.button_status = f'MASHALLAH1'
+                                            self.button_status = f'Loading Config'
                                             self.open_file_dialog()
-                                            self.button_status = f'MASHALLAH2'
+                                            self.button_status = f'Config file loaded successfully'
                                             self.load_config_file()
                                             # self.button_status = f'MASHALLAH3'
                                 elif key == b'\x08':  # Backspace
