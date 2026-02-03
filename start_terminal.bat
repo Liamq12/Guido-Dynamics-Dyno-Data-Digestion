@@ -1,3 +1,4 @@
 @echo off
-start "User Terminal" python "%~dp0UserTerminal.py"
+cd %~dp0
+start "User Terminal" python "UserTerminal.py"
 exit
