@@ -1,5 +1,6 @@
 import socket, json, time, random
 from influxdb_client import InfluxDBClient, Point, WriteOptions
+import os
 
 UDP_IP = "192.168.0.2"
 UDP_PORT = 7
@@ -14,11 +15,22 @@ sock.bind((UDP_IP, UDP_PORT))
 sock.settimeout(5.0)
 print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
 
-# ---------- INFLUXDB SETUP ----------
-INFLUX_URL = "http://localhost:8086"
-TOKEN = "oWfIXrWjWZvTSD9d54G7mIWVxd8pqhSlrV98CA6I3aDXh86_g1U9_n4VKMdUpNEeevFkfKlsSjeS0XTJLphRbw=="
-ORG = "Me"
-BUCKET = "Test1"
+# ---------- InfluxDB Setup ----------
+#load in the influx db file for user token and such
+influx_file_path = os.path.join(os.getcwd(), "configs\\influxdb.json")
+try:
+    with open(influx_file_path, 'r', encoding='utf-8') as f:
+        json_data = json.load(f)
+        INFLUX_URL = "http://localhost:8086"
+        TOKEN = json_data.get("Token")
+        ORG = json_data.get("Org")
+        BUCKET = json_data.get("Bucket")
+except Exception as e:
+    INFLUX_URL = "http://localhost:8086"
+    TOKEN = "blank"
+    ORG = "blank"
+    BUCKET = "blank"
+
 
 client = InfluxDBClient(url=INFLUX_URL, token=TOKEN, org=ORG)
 

@@ -38,15 +38,21 @@ class TerminalInterface:
         self.json_error = None
         self.start_time = datetime.now() # - timedelta(days=3, hours=12, minutes=45)
 
-        # ---------- InfluxDB Setup ----------
-        self.INFLUX_URL = "http://localhost:8086"
-        self.TOKEN = "oWfIXrWjWZvTSD9d54G7mIWVxd8pqhSlrV98CA6I3aDXh86_g1U9_n4VKMdUpNEeevFkfKlsSjeS0XTJLphRbw=="
-        self.ORG = "Me"
-        self.BUCKET = "Test1"
-
-        self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
-        self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
-
+        #load in the influx db file for user token and such
+        self.influx_file_path = os.path.join(os.getcwd(), "configs\\influxdb.json")
+        try:
+            with open(self.influx_file_path, 'r', encoding='utf-8') as f:
+                self.json_data = json.load(f)
+                self.INFLUX_URL = "http://localhost:8086"
+                self.TOKEN = self.json_data.get("Token")
+                self.ORG = self.json_data.get("Org")
+                self.BUCKET = self.json_data.get("Bucket")
+                self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+                self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                self.influx_json_read = True
+        except Exception as e:
+            self.influx_json_read = False
+        
         self.gear_ratio = 0
         
         # Initialize data
@@ -255,6 +261,73 @@ class TerminalInterface:
             print("Error parsing packet:", e)
             self.button_status = (f"Error parsing packet:", e)
 
+    def make_influx_config_token(self):
+        """Create input form view"""
+        content = []
+        
+        content.append("[bold white]Inlfux DB Setup[/bold white]\n")
+        content.append("[green]Enter InfluxDB Token:[/green]\n")
+        
+        # Input field display
+        input_display = f"[cyan]> {self.input_value}_[/cyan]"
+        content.append(f"  {input_display}\n")
+        
+        # Show submitted value
+        if self.submitted_value is not None:
+            self.influx_token = self.submitted_value
+            self.submitted_value = None
+            self.active_tab = -2
+                
+        else:
+            content.append("\n[dim]No value submitted yet[/dim]")
+        
+        return Panel("\n".join(content), title="Input", style="green")
+
+    def make_influx_config_org(self):
+        """Create input form view"""
+        content = []
+        
+        content.append("[bold white]Inlfux DB Setup[/bold white]\n")
+        content.append("[green]Enter InfluxDB Org:[/green]\n")
+        
+        # Input field display
+        input_display = f"[cyan]> {self.input_value}_[/cyan]"
+        content.append(f"  {input_display}\n")
+        
+        # Show submitted value
+        if self.submitted_value is not None:
+            self.influx_org = self.submitted_value
+            self.submitted_value = None
+            self.active_tab = -3
+                
+        else:
+            content.append("\n[dim]No value submitted yet[/dim]")
+        
+        return Panel("\n".join(content), title="Input", style="green") 
+
+    def make_influx_config_bucket(self):
+        """Create input form view"""
+        content = []
+        
+        content.append("[bold white]Inlfux DB Setup[/bold white]\n")
+        content.append("[green]Enter InfluxDB Bucket:[/green]\n")
+        
+        # Input field display
+        input_display = f"[cyan]> {self.input_value}_[/cyan]"
+        content.append(f"  {input_display}\n")
+        
+        # Show submitted value
+        if self.submitted_value is not None:
+            self.influx_bucket = self.submitted_value
+            self.submitted_value = None
+            self.set_influx_data()
+            self.active_tab = 0
+                
+        else:
+            content.append("\n[dim]No value submitted yet[/dim]")
+        
+        return Panel("\n".join(content), title="Input", style="green")         
+
     def make_input_tab(self):
         """Create input form view"""
         content = []
@@ -339,7 +412,13 @@ class TerminalInterface:
         layout["footer"].update(self.make_footer())
         
         # Content based on active tab
-        if self.active_tab == 0:
+        if self.active_tab == -1:
+            layout["content"].update(self.make_influx_config_token())
+        elif self.active_tab == -2:
+            layout["content"].update(self.make_influx_config_org())
+        elif self.active_tab == -3:
+            layout["content"].update(self.make_influx_config_bucket())
+        elif self.active_tab == 0:
             layout["content"].update(self.make_system_tab())
         elif self.active_tab == 1:
             layout["content"].update(self.make_processes_tab())
@@ -354,6 +433,29 @@ class TerminalInterface:
         
         return layout
     
+    def set_influx_data(self):
+
+        data = {
+        "Token": self.influx_token,
+        "Org": self.influx_org,
+        "Bucket": self.influx_bucket
+        }
+
+        # Write the data to a JSON file
+        with open(self.influx_file_path, "w") as json_file:
+            json.dump(data, json_file, indent=4)    
+
+        #read data from JSON and start influxdb
+        with open(self.influx_file_path, 'r', encoding='utf-8') as f:
+                self.json_data = json.load(f)
+                self.INFLUX_URL = "http://localhost:8086"
+                self.TOKEN = self.json_data.get("Token")
+                self.ORG = self.json_data.get("Org")
+                self.BUCKET = self.json_data.get("Bucket")
+                self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+                self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                self.influx_json_read = True
+
     def run(self):
         """Main loop with Live display"""
         print("[green]Terminal Interface - Press Q to quit[/green]")
@@ -411,15 +513,22 @@ class TerminalInterface:
                                             self.button_status = f'Config file loaded successfully'
                                             self.load_config_file()
                                             # self.button_status = f'MASHALLAH3'
+                                    elif self.active_tab < 0:
+                                        self.submitted_value = self.input_value
+                                        self.input_value = ""
                                 elif key == b'\x08':  # Backspace
-                                    if self.active_tab == 4:
+                                    if self.active_tab == 4 or self.active_tab < 0:
                                         self.input_value = self.input_value[:-1]
                                 else:
                                     try:
-                                        char = key.decode('utf-8').lower()
-                                        if char == 'q':
+                                        char = key.decode('utf-8')
+                                        if self.active_tab >= 0:
+                                            char = key.decode('utf-8').lower()
+                                        if char == 'q' and self.active_tab >= 0:
                                             self.running = False
                                         elif self.active_tab == 4 and char.isdigit():
+                                            self.input_value += char
+                                        elif self.active_tab < 0:
                                             self.input_value += char
                                     except:
                                         pass
@@ -503,6 +612,8 @@ class TerminalInterface:
             
             # Main display loop
             with Live(self.make_layout(), refresh_per_second=10, screen=True) as live:
+                if(not self.influx_json_read):
+                    self.active_tab = -1 #fake tab for one-time setup of influxdb
                 while self.running:
                     self.update_data()
                     live.update(self.make_layout())
