@@ -1,9 +1,13 @@
 import socket, json, time, random
 from influxdb_client import InfluxDBClient, Point, WriteOptions
 import os
+import threading
 
 UDP_IP = "192.168.0.2"
 UDP_PORT = 7
+
+UDP_IP_SEND = "192.168.0.123"
+UDP_PORT_SEND = 8
 
 # Load cell constants
 loadcellZero = 1.660
@@ -14,6 +18,8 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((UDP_IP, UDP_PORT))
 sock.settimeout(5.0)
 print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
+
+sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # ---------- InfluxDB Setup ----------
 #load in the influx db file for user token and such
@@ -44,11 +50,34 @@ write_api = client.write_api(write_options=WriteOptions(
     retry_interval=5_000
 ))
 
+query_valvePos = f'from(bucket: "{BUCKET}") |> range(start: -1h) |> filter(fn: (r) => r._measurement == "ValvePos")' #setup query for valvepos from influxdb
+query_api = client.query_api()
+
 fbombs = 0
 
 try:
+    def influx_to_stm32():
+        while True:
+            try: #read data from influxdb and send to the controller
+                valve_result = query_api.query(query=query_valvePos, org=ORG)
+                for table in valve_result:
+                    last_record = table.records.pop()
+                    valve_pos = last_record['_value']
+                    message = f"VALVE,SET,{valve_pos}"
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    #print(f"Last value is: {last_record['_value']}")
+
+            except Exception as e:
+                print("Unexpected error: ")
+                print(e)
+                continue
+            time.sleep(0.1)
+            
+    read_influx_t = threading.Thread(target=influx_to_stm32, daemon=True)
+    read_influx_t.start()
+
     while True:
-        try:
+        try: #read data from ethernet connection and upload to influxdb
             data, addr = sock.recvfrom(4096)
             raw = data.decode("utf-8").strip()
             raw = raw.replace("inf", "-1")
@@ -127,6 +156,7 @@ try:
         except Exception as e:
             print(f"Unexpected error in main loop: {e}")
             continue
+        
 
 except KeyboardInterrupt:
     print("\nShutting down gracefully...")

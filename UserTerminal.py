@@ -31,7 +31,7 @@ class TerminalInterface:
         self.input_value = ""
         self.submitted_value = None
         self.selected_button = 0
-        self.button_labels = ['Start', 'Stop', 'Restart', 'Load Configuration File', 'Exit']
+        self.button_labels = ['Start', 'Stop', 'Restart', 'Load Configuration File', 'Setup InfluxDB', 'Exit']
         self.button_status = ""
         self.json_file_path = None
         self.json_data = None
@@ -123,26 +123,27 @@ class TerminalInterface:
         
         return Panel("\n".join(content), title="System", style="green")
     
-    def make_processes_tab(self):
-        """Create process list view"""
-        table = Table(show_header=True, header_style="bold black on green", border_style="green")
-        table.add_column("PID", width=8)
-        table.add_column("NAME", width=16)
-        table.add_column("CPU%", justify="right", width=8)
-        table.add_column("MEM(MB)", justify="right", width=10)
-        table.add_column("TIME", justify="right", width=10)
+    def make_valvepos_tab(self):
+        """Create input form view"""
+        content = []
         
-        for proc in self.processes[:12]:
-            color = self.get_color(proc['cpu'])
-            table.add_row(
-                str(proc['pid']),
-                proc['name'],
-                f"[{color}]{proc['cpu']}%[/{color}]",
-                f"{proc['mem']}",
-                proc['time']
-            )
+        content.append("[bold white]Number Input Form[/bold white]\n")
+        content.append("[green]Enter a numeric value below (0-100) corresponding to valve opening percentage:[/green]\n")
         
-        return Panel(table, title="Top Processes by CPU", style="green")
+        # Input field display
+        input_display = f"[cyan]> {self.input_value}_[/cyan]" if len(self.input_value) < 20 else f"[cyan]> {self.input_value}[/cyan]"
+        content.append(f"  {input_display}\n")
+        
+        # Instructions
+        content.append("[yellow]Type numbers (0-9), Backspace to delete, Enter to submit[/yellow]\n")
+        
+        # Show submitted value
+        if self.submitted_value is not None:
+            content.append(f"\n[bold green]Last Submitted Value: {self.submitted_value}[/bold green]")
+        else:
+            content.append("\n[dim]No value submitted yet[/dim]")
+        
+        return Panel("\n".join(content), title="Input", style="green")
     
     def make_network_tab(self):
         """Create network information view"""
@@ -333,7 +334,7 @@ class TerminalInterface:
         content = []
         
         content.append("[bold white]Number Input Form[/bold white]\n")
-        content.append("[green]Enter a numeric value below:[/green]\n")
+        content.append("[green]Enter a numeric value below:\n")
         
         # Input field display
         input_display = f"[cyan]> {self.input_value}_[/cyan]" if len(self.input_value) < 20 else f"[cyan]> {self.input_value}[/cyan]"
@@ -345,8 +346,6 @@ class TerminalInterface:
         # Show submitted value
         if self.submitted_value is not None:
             content.append(f"\n[bold green]Last Submitted Value: {self.submitted_value}[/bold green]")
-            content.append(f"[green]Value squared: {self.submitted_value ** 2}[/green]")
-            content.append(f"[green]Value doubled: {self.submitted_value * 2}[/green]")
         else:
             content.append("\n[dim]No value submitted yet[/dim]")
         
@@ -421,7 +420,7 @@ class TerminalInterface:
         elif self.active_tab == 0:
             layout["content"].update(self.make_system_tab())
         elif self.active_tab == 1:
-            layout["content"].update(self.make_processes_tab())
+            layout["content"].update(self.make_valvepos_tab())
         elif self.active_tab == 2:
             layout["content"].update(self.make_network_tab())
         elif self.active_tab == 3:
@@ -499,12 +498,32 @@ class TerminalInterface:
                                             self.selected_button = (self.selected_button + 1) % len(self.button_labels)
                                 # Handle special keys
                                 elif key == b'\r':  # Enter
-                                    if self.active_tab == 4 and self.input_value:
+                                    if (self.active_tab == 4) and self.input_value:
                                         try:
                                             self.submitted_value = int(self.input_value)
                                             self.input_value = ""
                                         except ValueError:
                                             pass
+                                    elif self.active_tab == 1 and self.input_value:
+                                        self.submitted_value = int(self.input_value)
+                                        self.input_value = ""
+                                        try:
+                                            metric = "ValvePos"
+                                            device = "terminal"
+                                            unit = "none"
+                                            value = self.submitted_value
+                                            point = (
+                                                Point(metric)
+                                                .tag("device", device)
+                                                .tag("unit", unit)
+                                                .field("value", float(value))
+                                                )
+
+                                            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
+                                            print(f"Wrote: {metric}={value} {unit}")
+                                        except Exception as e:
+                                            print(f"Error writing {metric}: {e}")
+
                                     elif self.active_tab == 5:  # Buttons tab
                                         self.button_status = f"Button '{self.button_labels[self.selected_button]}' pressed!"
                                         if(self.button_status == f"Button \'Load Configuration File\' pressed!"):
@@ -513,11 +532,13 @@ class TerminalInterface:
                                             self.button_status = f'Config file loaded successfully'
                                             self.load_config_file()
                                             # self.button_status = f'MASHALLAH3'
+                                        elif (self.button_status == f"Button \'Setup InfluxDB\' pressed!"):
+                                            self.active_tab = -1
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
                                 elif key == b'\x08':  # Backspace
-                                    if self.active_tab == 4 or self.active_tab < 0:
+                                    if self.active_tab == 4 or self.active_tab < 0 or self.active_tab == 1:
                                         self.input_value = self.input_value[:-1]
                                 else:
                                     try:
@@ -526,7 +547,7 @@ class TerminalInterface:
                                             char = key.decode('utf-8').lower()
                                         if char == 'q' and self.active_tab >= 0:
                                             self.running = False
-                                        elif self.active_tab == 4 and char.isdigit():
+                                        elif (self.active_tab == 4  or self.active_tab == 1) and char.isdigit():
                                             self.input_value += char
                                         elif self.active_tab < 0:
                                             self.input_value += char
