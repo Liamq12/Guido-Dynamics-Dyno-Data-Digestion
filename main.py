@@ -50,21 +50,24 @@ write_api = client.write_api(write_options=WriteOptions(
     retry_interval=5_000
 ))
 
-query_valvePos = f'from(bucket: "{BUCKET}") |> range(start: -1h) |> filter(fn: (r) => r._measurement == "ValvePos")' #setup query for valvepos from influxdb
+query_valvePos = f'from(bucket: "{BUCKET}") |> range(start: -1m) |> filter(fn: (r) => r._measurement == "ValvePos")' #setup query for valvepos from influxdb
 query_api = client.query_api()
 
 fbombs = 0
 
 try:
     def influx_to_stm32():
+        last_valve_pos = None
         while True:
             try: #read data from influxdb and send to the controller
                 valve_result = query_api.query(query=query_valvePos, org=ORG)
                 for table in valve_result:
                     last_record = table.records.pop()
                     valve_pos = last_record['_value']
-                    message = f"VALVE,SET,{valve_pos}"
-                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    if valve_pos != last_valve_pos:
+                        last_valve_pos = valve_pos
+                        message = f"VALVE,POS,{valve_pos}"
+                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     #print(f"Last value is: {last_record['_value']}")
 
             except Exception as e:
