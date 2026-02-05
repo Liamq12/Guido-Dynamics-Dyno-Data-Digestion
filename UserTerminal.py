@@ -26,12 +26,15 @@ class TerminalInterface:
     def __init__(self):
         self.console = Console()
         self.active_tab = 0
-        self.tabs = ['SYSTEM', 'PROCESSES', 'NETWORK', 'DISK', 'GEAR SYNCH', 'CONTROLS']
+        self.tabs = ['SYSTEM', 'VALVE', 'NETWORK', 'DISK', 'GEAR SYNCH', 'CONTROLS']
         self.cpu_count = 8
         self.input_value = ""
+        self.valve_entries = ["", "", "SAVE"]
         self.submitted_value = None
         self.selected_button = 0
-        self.button_labels = ['Start', 'Stop', 'Restart', 'Load Configuration File', 'Setup InfluxDB', 'Exit']
+        self.selected_entry = 0
+        self.button_labels = ['Setup Valve', 'Stop', 'Restart', 'Load Configuration File', 'Setup InfluxDB', 'Exit']
+        self.entries = ["[green]Enter valve controller pulses per rotation:\n", "[green]Enter planetary gearbox ratio (output/input):\n", "[green]Save Values:\n"]
         self.button_status = ""
         self.json_file_path = None
         self.json_data = None
@@ -40,6 +43,7 @@ class TerminalInterface:
 
         #load in the influx db file for user token and such
         self.influx_file_path = os.path.join(os.getcwd(), "configs\\influxdb.json")
+        self.system_config_file_path = os.path.join(os.getcwd(), "configs\\config.json")
         try:
             with open(self.influx_file_path, 'r', encoding='utf-8') as f:
                 self.json_data = json.load(f)
@@ -52,6 +56,16 @@ class TerminalInterface:
                 self.influx_json_read = True
         except Exception as e:
             self.influx_json_read = False
+
+        try:
+            with open(self.system_config_file_path, 'r', encoding='utf-8') as f:
+                self.json_data = json.load(f)
+                self.valve_entries[0] = self.json_data.get("PPR")
+                self.valve_entries[1] = self.json_data.get("GRO")
+
+                self.send_valve_params()
+        except Exception as e:
+            print(e)
         
         self.gear_ratio = 0
         
@@ -62,6 +76,38 @@ class TerminalInterface:
         self.processes = []
         self.running = True
         
+
+    def send_valve_params(self):
+        try:
+            metric = "PPR"
+            device = "terminal"
+            unit = "none"
+            value = self.valve_entries[0]
+            point = (
+                Point(metric)
+                .tag("device", device)
+                .tag("unit", unit)
+                .field("value", float(value))
+                )
+
+            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
+            print(f"Wrote: {metric}={value} {unit}")
+            metric = "GRO"
+            device = "terminal"
+            unit = "none"
+            value = self.valve_entries[1]
+            point = (
+                    Point(metric)
+                    .tag("device", device)
+                    .tag("unit", unit)
+                    .field("value", float(value))
+                )
+            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
+            print(f"Wrote: {metric}={value} {unit}")
+
+        except Exception as e:
+            print(f"Error writing {metric}: {e}")  
+            
     def get_color(self, value):
         """Return color based on value"""
         if value < 30:
@@ -351,6 +397,37 @@ class TerminalInterface:
         
         return Panel("\n".join(content), title="Input", style="green")
     
+    def make_valve_setup_tab(self):
+        """Create input form view"""
+        content = []
+        
+        content.append("[bold white]Valve Setup Form[/bold white]\n")
+
+        for i, label in enumerate(self.valve_entries):
+            content.append(self.entries[i])
+            if i == self.selected_entry:
+                input_display = f"[black on cyan] [ {self.valve_entries[i]} ] [/black on cyan]  "
+                content.append(f"  {input_display}\n")
+            else:
+                input_display = f"[cyan][ {self.valve_entries[i]} ][/cyan]  "
+                content.append(f"  {input_display}\n")
+
+        '''
+        content.append("[green]Enter valve controller pulses per rotation:\n")
+        
+        # Input field display pulses
+        input_display = f"[cyan]> {self.valve_ppr}_[/cyan]" if len(self.valve_ppr) < 20 else f"[cyan]> {self.valve_ppr}[/cyan]"
+        content.append(f"  {input_display}\n")
+
+        content.append("[green]Enter planetary gearbox ratio (output/input):\n")
+        
+        # Input field display gear ratio
+        input_display = f"[cyan]> {self.valve_gro}_[/cyan]" if len(self.valve_gro) < 20 else f"[cyan]> {self.valve_gro}[/cyan]"
+        content.append(f"  {input_display}\n")
+        '''
+        
+        return Panel("\n".join(content), title="Input", style="green")
+    
     def make_disk_tab(self):
         """Create disk information view"""
         content = []
@@ -417,6 +494,8 @@ class TerminalInterface:
             layout["content"].update(self.make_influx_config_org())
         elif self.active_tab == -3:
             layout["content"].update(self.make_influx_config_bucket())
+        elif self.active_tab == -4:
+            layout["content"].update(self.make_valve_setup_tab())
         elif self.active_tab == 0:
             layout["content"].update(self.make_system_tab())
         elif self.active_tab == 1:
@@ -496,6 +575,14 @@ class TerminalInterface:
                                     elif extended == b'M':  # Right arrow
                                         if self.active_tab == 5:
                                             self.selected_button = (self.selected_button + 1) % len(self.button_labels)
+                                    elif extended == b'H':  # Up arrow
+                                        if self.active_tab == -4:
+                                            self.selected_entry = (self.selected_entry - 1) % len(self.entries)
+                                            self.input_value = self.valve_entries[self.selected_entry]
+                                    elif extended == b'P':  # Down arrow
+                                        if self.active_tab == -4:
+                                            self.selected_entry = (self.selected_entry + 1) % len(self.entries)
+                                            self.input_value = self.valve_entries[self.selected_entry]
                                 # Handle special keys
                                 elif key == b'\r':  # Enter
                                     if (self.active_tab == 4) and self.input_value:
@@ -523,6 +610,19 @@ class TerminalInterface:
                                             print(f"Wrote: {metric}={value} {unit}")
                                         except Exception as e:
                                             print(f"Error writing {metric}: {e}")
+                                    elif self.active_tab == -4 and self.selected_entry == 2:
+                                        data = {
+                                            "PPR": self.valve_entries[0],
+                                            "GRO": self.valve_entries[1]
+                                                }
+
+                                            # Write the data to a JSON file
+                                        with open(self.system_config_file_path, "w") as json_file:
+                                            json.dump(data, json_file, indent=4) 
+
+                                        self.send_valve_params()
+
+                                        self.active_tab = 5 
 
                                     elif self.active_tab == 5:  # Buttons tab
                                         self.button_status = f"Button '{self.button_labels[self.selected_button]}' pressed!"
@@ -534,11 +634,16 @@ class TerminalInterface:
                                             # self.button_status = f'MASHALLAH3'
                                         elif (self.button_status == f"Button \'Setup InfluxDB\' pressed!"):
                                             self.active_tab = -1
+                                        elif (self.button_status == f"Button \'Setup Valve\' pressed!"):
+                                            self.active_tab = -4
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
                                 elif key == b'\x08':  # Backspace
-                                    if self.active_tab == 4 or self.active_tab < 0 or self.active_tab == 1:
+                                    if self.active_tab == -4 and self.selected_entry != (len(self.entries) - 1):
+                                        self.input_value = self.input_value[:-1]
+                                        self.valve_entries[self.selected_entry] = self.input_value
+                                    elif self.active_tab == 4 or (self.active_tab < 0 and self.active_tab >= -3) or self.active_tab == 1:
                                         self.input_value = self.input_value[:-1]
                                 else:
                                     try:
@@ -549,7 +654,10 @@ class TerminalInterface:
                                             self.running = False
                                         elif (self.active_tab == 4  or self.active_tab == 1) and char.isdigit():
                                             self.input_value += char
-                                        elif self.active_tab < 0:
+                                        elif self.active_tab == -4 and (char.isdecimal() or char == '.') and self.selected_entry != (len(self.entries) - 1):
+                                            self.input_value += char
+                                            self.valve_entries[self.selected_entry] = self.input_value
+                                        elif self.active_tab < 0 and self.active_tab >= -3:
                                             self.input_value += char
                                     except:
                                         pass

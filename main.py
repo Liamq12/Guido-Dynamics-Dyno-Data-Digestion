@@ -51,6 +51,8 @@ write_api = client.write_api(write_options=WriteOptions(
 ))
 
 query_valvePos = f'from(bucket: "{BUCKET}") |> range(start: -1m) |> filter(fn: (r) => r._measurement == "ValvePos")' #setup query for valvepos from influxdb
+query_valvePPR = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "PPR")' #setup query for valvepos from influxdb
+query_valveGRO = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "GRO")' #setup query for valvepos from influxdb
 query_api = client.query_api()
 
 fbombs = 0
@@ -58,9 +60,13 @@ fbombs = 0
 try:
     def influx_to_stm32():
         last_valve_pos = None
+        last_ppr = None
+        last_gro = None
         while True:
             try: #read data from influxdb and send to the controller
                 valve_result = query_api.query(query=query_valvePos, org=ORG)
+                ppr_result = query_api.query(query=query_valvePPR, org=ORG)
+                gro_result = query_api.query(query=query_valveGRO, org=ORG)
                 for table in valve_result:
                     last_record = table.records.pop()
                     valve_pos = last_record['_value']
@@ -69,6 +75,24 @@ try:
                         message = f"VALVE,POS,{valve_pos}"
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     #print(f"Last value is: {last_record['_value']}")
+                if ppr_result:
+                    for table in ppr_result:
+                        ppr = (table.records.pop())['_value']
+                        if ppr != last_ppr:
+                            last_ppr = ppr
+                            print("PPR updated:")
+                            print(last_ppr)
+                            message = f"VALVE,PPR,{last_ppr}"
+                            sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                if gro_result:
+                    for table in gro_result:
+                        gro = (table.records.pop())['_value']
+                        if gro != last_gro:
+                            last_gro = gro
+                            print("GRO updated:")
+                            print(last_gro)
+                            message = f"VALVE,GRO,{last_gro}"
+                            sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
 
             except Exception as e:
                 print("Unexpected error: ")
