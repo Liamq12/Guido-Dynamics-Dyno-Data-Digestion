@@ -621,7 +621,7 @@ class TerminalInterface:
                                             json.dump(data, json_file, indent=4) 
 
                                         self.send_valve_params()
-
+                                        self.input_value = ""
                                         self.active_tab = 5 
 
                                     elif self.active_tab == 5:  # Buttons tab
