@@ -26,20 +26,26 @@ class TerminalInterface:
     def __init__(self):
         self.console = Console()
         self.active_tab = 0
-        self.tabs = ['SYSTEM', 'VALVE', 'NETWORK', 'DISK', 'GEAR SYNCH', 'CONTROLS']
-        self.cpu_count = 8
+        self.tabs = ['VALVE', 'RUN', 'GEAR SYNCH', 'CONTROLS']
         self.input_value = ""
         self.valve_entries = ["", "", "SAVE"]
         self.submitted_value = None
         self.selected_button = 0
         self.selected_entry = 0
-        self.button_labels = ['Setup Valve', 'Stop', 'Restart', 'Load Configuration File', 'Setup InfluxDB', 'Exit']
+        self.button_labels = ['Setup Valve', 'Load Run Plan', 'Load Configuration File', 'Setup InfluxDB', 'Exit']
         self.entries = ["[green]Enter valve controller pulses per rotation:\n", "[green]Enter planetary gearbox ratio (output/input):\n", "[green]Save Values:\n"]
         self.button_status = ""
         self.json_file_path = None
         self.json_data = None
         self.json_error = None
         self.start_time = datetime.now() # - timedelta(days=3, hours=12, minutes=45)
+        self.ramp_t = None
+        self.run_config = None
+        self.run_mode = None
+        self.start_rpm = None
+        self.end_rpm = None
+        self.ramp_rate = None
+        self.current_valve_pos = 0
 
         #load in the influx db file for user token and such
         self.influx_file_path = os.path.join(os.getcwd(), "configs\\influxdb.json")
@@ -69,14 +75,8 @@ class TerminalInterface:
         
         self.gear_ratio = 0
         
-        # Initialize data
-        self.cpu_data = [0] * self.cpu_count
-        self.mem_used = 8000
-        self.mem_total = 16384
-        self.processes = []
         self.running = True
         
-
     def send_valve_params(self):
         try:
             metric = "PPR"
@@ -150,25 +150,6 @@ class TerminalInterface:
         menu_text = "  ".join(menu_parts)
         return Panel(menu_text, style="green")
     
-    def make_system_tab(self):
-        """Create system information view"""
-        content = []
-        
-        # CPU Section
-        content.append("[bold white]CPU Usage:[/bold white]\n")
-        for i, cpu in enumerate(self.cpu_data):
-            bar = self.create_bar(cpu, 100, 40)
-            content.append(f"  CPU{i}  {bar}")
-        
-        content.append("\n[bold white]Memory:[/bold white]")
-        mem_bar = self.create_bar(self.mem_used, self.mem_total, 40)
-        content.append(f"  MEM   {mem_bar}  [green]{self.mem_used}MB / {self.mem_total}MB[/green]")
-        
-        content.append("\n[bold white]Load Average:[/bold white]")
-        content.append("  [green]1 min: 2.45 | 5 min: 1.98 | 15 min: 1.67[/green]")
-        
-        return Panel("\n".join(content), title="System", style="green")
-    
     def make_valvepos_tab(self):
         """Create input form view"""
         content = []
@@ -191,7 +172,6 @@ class TerminalInterface:
         
         return Panel("\n".join(content), title="Input", style="green")
     
-    def make_network_tab(self):
         """Create network information view"""
         content = []
         
@@ -212,6 +192,30 @@ class TerminalInterface:
         
         return Panel("\n".join(content), title="Network", style="green")
     
+    def make_run_tab(self):
+        """Create input form view"""
+        content = []
+        
+        content.append("[bold white]Dyno Run Control[/bold white]\n")
+        
+        if self.run_config == None:
+            content.append("[yellow]No Run Plan Loaded[/yellow]\n")
+        else:
+            content.append("[yellow]Run Plan Loaded[/yellow]\n")
+            if self.run_mode == "Ramp":
+                content.append("[bold white]Ramp Mode[/bold white]\n")
+                content.append(f"[bold green]Start RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
+                content.append(f"[bold green]End RPM:[/bold green] [bold white]{self.end_rpm}[/bold white]\n")
+                content.append(f"[bold green]RPM Rate (RPM/s):[/bold green] [bold white]{self.ramp_rate}[/bold white]\n")
+            elif self.run_mode == "Hold":
+                content.append("[bold white]Hold Mode[/bold white]\n")
+                content.append(f"[bold green]Hold RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
+            content.append("[green]Press 'Enter' key to start[/green]")
+
+
+        content.append(f"[green]Current valve position: {self.current_valve_pos}[/green]")
+        return Panel("\n".join(content), title="Input", style="green")
+
     def make_buttons_tab(self):
         """Create buttons/menu view"""
         content = []
@@ -308,6 +312,16 @@ class TerminalInterface:
             print("Error parsing packet:", e)
             self.button_status = (f"Error parsing packet:", e)
 
+    def load_run_plan(self):
+        self.run_config = self.json_data
+        self.run_mode = self.run_config.get("Mode")
+        if self.run_mode == "Ramp":
+            self.start_rpm = int(self.run_config.get("Start"))
+            self.end_rpm = int(self.run_config.get("End"))
+            self.ramp_rate = float(self.run_config.get("Rate"))
+        elif self.run_mode == "Hold":
+            self.start_rpm = int(self.run_config.get("RPM"))
+
     def make_influx_config_token(self):
         """Create input form view"""
         content = []
@@ -376,6 +390,7 @@ class TerminalInterface:
         return Panel("\n".join(content), title="Input", style="green")         
 
     def make_input_tab(self):
+
         """Create input form view"""
         content = []
         
@@ -385,15 +400,6 @@ class TerminalInterface:
         # Input field display
         input_display = f"[cyan]> {self.input_value}_[/cyan]" if len(self.input_value) < 20 else f"[cyan]> {self.input_value}[/cyan]"
         content.append(f"  {input_display}\n")
-        
-        # Instructions
-        content.append("[yellow]Type numbers (0-9), Backspace to delete, Enter to submit[/yellow]\n")
-        
-        # Show submitted value
-        if self.submitted_value is not None:
-            content.append(f"\n[bold green]Last Submitted Value: {self.submitted_value}[/bold green]")
-        else:
-            content.append("\n[dim]No value submitted yet[/dim]")
         
         return Panel("\n".join(content), title="Input", style="green")
     
@@ -427,8 +433,7 @@ class TerminalInterface:
         '''
         
         return Panel("\n".join(content), title="Input", style="green")
-    
-    def make_disk_tab(self):
+
         """Create disk information view"""
         content = []
         
@@ -447,30 +452,6 @@ class TerminalInterface:
         """Create footer panel"""
         footer_text = "[green]F1:System F2:Processes F3:Network F4:Disk F5:Input F6:Buttons | Q:Quit[/green]"
         return Panel(footer_text, style="green")
-    
-    def update_data(self):
-        """Update simulated data"""
-        # Update CPU data
-        self.cpu_data = [random.randint(0, 100) for _ in range(self.cpu_count)]
-        
-        # Update memory
-        self.mem_used = 8000 + random.randint(0, 4000)
-        
-        # Update processes
-        process_names = ['node', 'python', 'docker', 'postgres', 'nginx', 
-                        'redis', 'chrome', 'vscode', 'systemd', 'bash',
-                        'ssh', 'apache2', 'mysql', 'git', 'npm']
-        self.processes = [
-            {
-                'pid': 1000 + i,
-                'name': name,
-                'cpu': random.randint(0, 100),
-                'mem': random.randint(100, 2048),
-                'time': f"{random.randint(0, 59)}:{random.randint(0, 59):02d}"
-            }
-            for i, name in enumerate(process_names)
-        ]
-        self.processes.sort(key=lambda x: x['cpu'], reverse=True)
     
     def make_layout(self):
         """Create the layout"""
@@ -497,16 +478,12 @@ class TerminalInterface:
         elif self.active_tab == -4:
             layout["content"].update(self.make_valve_setup_tab())
         elif self.active_tab == 0:
-            layout["content"].update(self.make_system_tab())
-        elif self.active_tab == 1:
             layout["content"].update(self.make_valvepos_tab())
+        elif self.active_tab == 1:
+            layout["content"].update(self.make_run_tab())
         elif self.active_tab == 2:
-            layout["content"].update(self.make_network_tab())
-        elif self.active_tab == 3:
-            layout["content"].update(self.make_disk_tab())
-        elif self.active_tab == 4:
             layout["content"].update(self.make_input_tab())
-        elif self.active_tab == 5:
+        elif self.active_tab == 3:
             layout["content"].update(self.make_buttons_tab())
         
         return layout
@@ -534,6 +511,51 @@ class TerminalInterface:
                 self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
                 self.influx_json_read = True
 
+    def send_valve_pos(self, valve_pos):
+        try:
+            metric = "ValvePos"
+            device = "terminal"
+            unit = "none"
+            value = valve_pos
+            point = (
+                    Point(metric)
+                    .tag("device", device)
+                    .tag("unit", unit)
+                    .field("value", float(value))
+                    )
+            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
+            print(f"Wrote: {metric}={value} {unit}")
+            self.current_valve_pos = value
+        except Exception as e:
+            print(f"Error writing {metric}: {e}")
+
+    def valve_pos_ramp(self, start, end, rate, loop):
+        valve_pos = start
+        prev_time = time.time()
+        while (valve_pos < end):
+            ct = time.time()
+            dt = ct - prev_time
+            valve_pos = valve_pos + rate*dt
+            if(valve_pos > end):
+                valve_pos = end
+            self.send_valve_pos(valve_pos)
+            prev_time = ct
+            time.sleep(0.1)
+        
+        while(loop):
+            valve_pos = start
+            prev_time = time.time()
+            while (valve_pos < end):
+                ct = time.time()
+                dt = ct - prev_time
+                valve_pos = valve_pos + rate*dt
+                if(valve_pos > end):
+                    valve_pos = end
+                self.send_valve_pos(valve_pos)
+                prev_time = ct
+                time.sleep(0.1)
+        
+        
     def run(self):
         """Main loop with Live display"""
         print("[green]Terminal Interface - Press Q to quit[/green]")
@@ -565,15 +587,11 @@ class TerminalInterface:
                                         self.active_tab = 2
                                     elif extended == b'>':  # F4
                                         self.active_tab = 3
-                                    elif extended == b'?':  # F5
-                                        self.active_tab = 4
-                                    elif extended == b'@':  # F6
-                                        self.active_tab = 5
                                     elif extended == b'K':  # Left arrow
-                                        if self.active_tab == 5:
+                                        if self.active_tab == 3:
                                             self.selected_button = (self.selected_button - 1) % len(self.button_labels)
                                     elif extended == b'M':  # Right arrow
-                                        if self.active_tab == 5:
+                                        if self.active_tab == 3:
                                             self.selected_button = (self.selected_button + 1) % len(self.button_labels)
                                     elif extended == b'H':  # Up arrow
                                         if self.active_tab == -4:
@@ -591,25 +609,11 @@ class TerminalInterface:
                                             self.input_value = ""
                                         except ValueError:
                                             pass
-                                    elif self.active_tab == 1 and self.input_value:
+                                    elif self.active_tab == 0 and self.input_value:
                                         self.submitted_value = int(self.input_value)
                                         self.input_value = ""
-                                        try:
-                                            metric = "ValvePos"
-                                            device = "terminal"
-                                            unit = "none"
-                                            value = self.submitted_value
-                                            point = (
-                                                Point(metric)
-                                                .tag("device", device)
-                                                .tag("unit", unit)
-                                                .field("value", float(value))
-                                                )
+                                        self.send_valve_pos(self.submitted_value)
 
-                                            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
-                                            print(f"Wrote: {metric}={value} {unit}")
-                                        except Exception as e:
-                                            print(f"Error writing {metric}: {e}")
                                     elif self.active_tab == -4 and self.selected_entry == 2:
                                         data = {
                                             "PPR": self.valve_entries[0],
@@ -624,7 +628,7 @@ class TerminalInterface:
                                         self.input_value = ""
                                         self.active_tab = 5 
 
-                                    elif self.active_tab == 5:  # Buttons tab
+                                    elif self.active_tab == 3:  # Buttons tab
                                         self.button_status = f"Button '{self.button_labels[self.selected_button]}' pressed!"
                                         if(self.button_status == f"Button \'Load Configuration File\' pressed!"):
                                             self.button_status = f'Loading Config'
@@ -636,6 +640,21 @@ class TerminalInterface:
                                             self.active_tab = -1
                                         elif (self.button_status == f"Button \'Setup Valve\' pressed!"):
                                             self.active_tab = -4
+                                        if(self.button_status == f"Button \'Load Run Plan\' pressed!"):
+                                            self.button_status = f'Loading Config'
+                                            self.open_file_dialog()
+                                            self.button_status = f'Config file loaded successfully'
+                                            self.load_run_plan()
+                                            # self.button_status = f'MASHALLAH3'
+                                    elif self.active_tab == 1:
+                                        if self.run_mode == "Ramp":
+                                            start_rpm = self.start_rpm
+                                            end_rpm = self.end_rpm
+                                            ramp_rate = self.ramp_rate
+                                            self.ramp_t = threading.Thread(target=self.valve_pos_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
+                                            self.ramp_t.start()
+                                        else:
+                                            self.send_valve_pos(self.start_rpm)
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
@@ -643,22 +662,23 @@ class TerminalInterface:
                                     if self.active_tab == -4 and self.selected_entry != (len(self.entries) - 1):
                                         self.input_value = self.input_value[:-1]
                                         self.valve_entries[self.selected_entry] = self.input_value
-                                    elif self.active_tab == 4 or (self.active_tab < 0 and self.active_tab >= -3) or self.active_tab == 1:
+                                    elif self.active_tab == 4 or (self.active_tab < 0 and self.active_tab >= -3) or self.active_tab == 0:
                                         self.input_value = self.input_value[:-1]
                                 else:
                                     try:
                                         char = key.decode('utf-8')
-                                        if self.active_tab >= 0:
+                                        if self.active_tab > 0:
                                             char = key.decode('utf-8').lower()
                                         if char == 'q' and self.active_tab >= 0:
                                             self.running = False
-                                        elif (self.active_tab == 4  or self.active_tab == 1) and char.isdigit():
+                                        elif (self.active_tab == 4  or self.active_tab == 0) and char.isdigit():
                                             self.input_value += char
                                         elif self.active_tab == -4 and (char.isdecimal() or char == '.') and self.selected_entry != (len(self.entries) - 1):
                                             self.input_value += char
                                             self.valve_entries[self.selected_entry] = self.input_value
                                         elif self.active_tab < 0 and self.active_tab >= -3:
                                             self.input_value += char
+                                        
                                     except:
                                         pass
                         else:
@@ -744,7 +764,6 @@ class TerminalInterface:
                 if(not self.influx_json_read):
                     self.active_tab = -1 #fake tab for one-time setup of influxdb
                 while self.running:
-                    self.update_data()
                     live.update(self.make_layout())
         
         except KeyboardInterrupt:

@@ -1,0 +1,7 @@
+{
+    "Mode": "Ramp",
+    "Start": "10",
+    "End": "90",
+    "Rate": "5",
+    "StopMode": "Hold"
+}
