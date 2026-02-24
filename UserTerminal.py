@@ -11,6 +11,7 @@ import time
 import random
 import json
 import os
+import threading
 from influxdb_client import InfluxDBClient, Point, WriteOptions
 from tkinter import Tk, filedialog
 from datetime import datetime, timedelta
@@ -21,6 +22,7 @@ from rich.table import Table
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.live import Live
 from rich.text import Text
+from multiprocessing.connection import Client
 
 class TerminalInterface:
     def __init__(self):
@@ -47,9 +49,12 @@ class TerminalInterface:
         self.ramp_rate = None
         self.current_valve_pos = 0
 
+        self.is_ramping = False
+        self.stop_event = threading.Event()
+
         #load in the influx db file for user token and such
-        self.influx_file_path = os.path.join(os.getcwd(), "configs\\influxdb.json")
-        self.system_config_file_path = os.path.join(os.getcwd(), "configs\\config.json")
+        self.influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
+        self.system_config_file_path = os.path.join(os.getcwd(), "configs\\System\\valve_config.json")
         try:
             with open(self.influx_file_path, 'r', encoding='utf-8') as f:
                 self.json_data = json.load(f)
@@ -73,8 +78,7 @@ class TerminalInterface:
         except Exception as e:
             print(e)
         
-        self.gear_ratio = 0
-        
+        self.gear_ratio = 1
         self.running = True
         
     def send_valve_params(self):
@@ -201,7 +205,10 @@ class TerminalInterface:
         if self.run_config == None:
             content.append("[yellow]No Run Plan Loaded[/yellow]\n")
         else:
-            content.append("[yellow]Run Plan Loaded[/yellow]\n")
+            if(not self.is_ramping):
+                content.append("[yellow]Run Plan Loaded[/yellow]\n")
+            else:
+                content.append("[black on green]Running[/black on green]\n")
             if self.run_mode == "Ramp":
                 content.append("[bold white]Ramp Mode[/bold white]\n")
                 content.append(f"[bold green]Start RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
@@ -210,10 +217,10 @@ class TerminalInterface:
             elif self.run_mode == "Hold":
                 content.append("[bold white]Hold Mode[/bold white]\n")
                 content.append(f"[bold green]Hold RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
-            content.append("[green]Press 'Enter' key to start[/green]")
+            content.append("[green]Press 'Enter' key to start/stop[/green]")
 
 
-        content.append(f"[green]Current valve position: {self.current_valve_pos}[/green]")
+        content.append(f"[green]Target RPM: {round(self.current_valve_pos)}[/green]")
         return Panel("\n".join(content), title="Input", style="green")
 
     def make_buttons_tab(self):
@@ -299,6 +306,7 @@ class TerminalInterface:
             self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=self.point)
 
             # Construct InfluxDB point Gear Ratio
+            self.gear_ratio = self.json_data.get("Gear Ratio")
             self.point = (
                 Point("GearRatio")
                 .tag("device", "CMD")
@@ -319,8 +327,18 @@ class TerminalInterface:
             self.start_rpm = int(self.run_config.get("Start"))
             self.end_rpm = int(self.run_config.get("End"))
             self.ramp_rate = float(self.run_config.get("Rate"))
+            self.ipc_conn.send("Start RPM")
+            self.ipc_conn.send(self.start_rpm/self.gear_ratio)
+            self.ipc_conn.send("End RPM")
+            self.ipc_conn.send(self.end_rpm/self.gear_ratio)
+            self.ipc_conn.send("Rate")
+            self.ipc_conn.send(self.ramp_rate/self.gear_ratio)
         elif self.run_mode == "Hold":
             self.start_rpm = int(self.run_config.get("RPM"))
+            self.ipc_conn.send("Start RPM")
+            self.ipc_conn.send(self.start_rpm/self.gear_ratio)
+            self.ipc_conn.send("Rate")
+            self.ipc_conn.send(0)
 
     def make_influx_config_token(self):
         """Create input form view"""
@@ -395,7 +413,7 @@ class TerminalInterface:
         content = []
         
         content.append("[bold white]Number Input Form[/bold white]\n")
-        content.append("[green]Enter a numeric value below:\n")
+        content.append("[green]Enter the current motor RPM and press Enter:\n")
         
         # Input field display
         input_display = f"[cyan]> {self.input_value}_[/cyan]" if len(self.input_value) < 20 else f"[cyan]> {self.input_value}[/cyan]"
@@ -529,10 +547,10 @@ class TerminalInterface:
         except Exception as e:
             print(f"Error writing {metric}: {e}")
 
-    def valve_pos_ramp(self, start, end, rate, loop):
+    def valve_pos_ramp(self, start, end, rate, loop = False):
         valve_pos = start
         prev_time = time.time()
-        while (valve_pos < end):
+        while (valve_pos < end and not self.stop_event.is_set()):
             ct = time.time()
             dt = ct - prev_time
             valve_pos = valve_pos + rate*dt
@@ -541,20 +559,7 @@ class TerminalInterface:
             self.send_valve_pos(valve_pos)
             prev_time = ct
             time.sleep(0.1)
-        
-        while(loop):
-            valve_pos = start
-            prev_time = time.time()
-            while (valve_pos < end):
-                ct = time.time()
-                dt = ct - prev_time
-                valve_pos = valve_pos + rate*dt
-                if(valve_pos > end):
-                    valve_pos = end
-                self.send_valve_pos(valve_pos)
-                prev_time = ct
-                time.sleep(0.1)
-        
+        self.is_ramping = False
         
     def run(self):
         """Main loop with Live display"""
@@ -562,9 +567,20 @@ class TerminalInterface:
         print("[green]Use F1-F6 to switch tabs[/green]")
         print("\nStarting in 2 seconds...")
         time.sleep(2)
+        #setup IPC to main python program
+        self.ipc_address = ('localhost', 31205)
+        try:
+            self.ipc_conn = Client(self.ipc_address, authkey=b'key')
+        except Exception as e:
+            print(e)
+            time.sleep(5)
+        if self.ipc_conn == None:
+            print("No Connection")
+            time.sleep(5)
+            self.ipc_conn = Client(self.ipc_address)
+        self.ipc_conn.send('connecting')
         
         try:
-            import threading
             import sys
             
             def input_thread():
@@ -646,13 +662,21 @@ class TerminalInterface:
                                             self.button_status = f'Config file loaded successfully'
                                             self.load_run_plan()
                                             # self.button_status = f'MASHALLAH3'
-                                    elif self.active_tab == 1:
+                                    elif self.active_tab == 1: #run tab
                                         if self.run_mode == "Ramp":
-                                            start_rpm = self.start_rpm
-                                            end_rpm = self.end_rpm
-                                            ramp_rate = self.ramp_rate
-                                            self.ramp_t = threading.Thread(target=self.valve_pos_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
-                                            self.ramp_t.start()
+                                            if(self.is_ramping):
+                                                self.ipc_conn.send("Stop")
+                                                self.stop_event.set()
+                                                self.is_ramping = False
+                                            else:
+                                                self.ipc_conn.send("Start")
+                                                self.is_ramping = True
+                                                start_rpm = self.start_rpm
+                                                end_rpm = self.end_rpm
+                                                ramp_rate = self.ramp_rate
+                                                self.stop_event.clear()
+                                                self.ramp_t = threading.Thread(target=self.valve_pos_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
+                                                self.ramp_t.start()
                                         else:
                                             self.send_valve_pos(self.start_rpm)
                                     elif self.active_tab < 0:

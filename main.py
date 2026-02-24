@@ -2,6 +2,8 @@ import socket, json, time, random
 from influxdb_client import InfluxDBClient, Point, WriteOptions
 import os
 import threading
+from multiprocessing.connection import Listener
+import multiprocessing.connection
 
 UDP_IP = "192.168.0.2"
 UDP_PORT = 7
@@ -9,15 +11,49 @@ UDP_PORT = 7
 UDP_IP_SEND = "192.168.0.123"
 UDP_PORT_SEND = 8
 
+#setup ipc to user terminal
+ipc_address = ('localhost', 31205)
+ipc_listener = Listener(ipc_address, authkey=b'key')
+ipc_conn = ipc_listener.accept()
+def IPC(conn):
+        #TODO setup UDP control words to send data to the processor
+        while True:
+            msg = conn.recv()
+            if msg == "Start RPM":
+                rpm = conn.recv()
+                print(f"Start RPM set to: {rpm}")
+            elif msg == "End RPM":
+                rpm = conn.recv()
+                print(f"End RPM set to: {rpm}")
+            elif msg == "Rate":
+                rate = conn.recv()
+                print(f"RPM Rate set to: {rate}")
+            elif msg == "Start":
+                print("start ramp")
+            elif msg == "Stop":
+                print("stop ramp")
+
+
+IPC_t = threading.Thread(target=IPC, daemon=True, args=(ipc_conn,))
+IPC_t.start()
+
 # Load cell constants
 loadcellZero = 1.660
 loadcellTF = 0.00242304803289  # Volts per lbf
 
 # ---------- UDP SETUP ----------
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.bind((UDP_IP, UDP_PORT))
-sock.settimeout(5.0)
-print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
+try:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_IP, UDP_PORT))
+    sock.settimeout(5.0)
+    print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
+except:
+    print("no connection, just chilling")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("cancelled")
 
 sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -99,7 +135,7 @@ try:
                 print(e)
                 continue
             time.sleep(0.1)
-            
+    
     read_influx_t = threading.Thread(target=influx_to_stm32, daemon=True)
     read_influx_t.start()
 
@@ -178,12 +214,13 @@ try:
 
         except socket.timeout:
             print("No data received in 5 seconds...")
+            time.sleep(5)
             continue
 
         except Exception as e:
             print(f"Unexpected error in main loop: {e}")
             continue
-        
+
 
 except KeyboardInterrupt:
     print("\nShutting down gracefully...")
@@ -192,4 +229,5 @@ finally:
     write_api.close()
     client.close()
     sock.close()
+    ipc_listener.close()
     print("Cleanup complete")
