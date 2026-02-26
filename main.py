@@ -15,6 +15,15 @@ UDP_PORT_SEND = 8
 ipc_address = ('localhost', 31205)
 ipc_listener = Listener(ipc_address, authkey=b'key')
 ipc_conn = ipc_listener.accept()
+
+
+
+# Load cell constants
+loadcellZero = 1.660
+loadcellTF = 0.00242304803289  # Volts per lbf
+
+sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
 def IPC(conn):
         #TODO setup UDP control words to send data to the processor
         while True:
@@ -22,24 +31,37 @@ def IPC(conn):
             if msg == "Start RPM":
                 rpm = conn.recv()
                 print(f"Start RPM set to: {rpm}")
+                message = f"COPID,RPM,{rpm}"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "End RPM":
                 rpm = conn.recv()
                 print(f"End RPM set to: {rpm}")
+                message = f"FRAMP,RPM,{rpm}"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "Rate":
                 rate = conn.recv()
                 print(f"RPM Rate set to: {rate}")
+                message = f"FRAMP,RTE,{rate}"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "Start":
                 print("start ramp")
+                message = f"ERAMP,RPM,1"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "Stop":
                 print("stop ramp")
-
+                message = f"ERAMP,RPM,0"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            elif msg == "Start Hold RPM":
+                print("Holding RPM value")
+                message = f"ENPID,RPM,1"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            elif msg == "Stop Hold RPM":
+                print("Stop RPM hold")
+                message = f"ENPID,RPM,0"
+                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
 
 IPC_t = threading.Thread(target=IPC, daemon=True, args=(ipc_conn,))
 IPC_t.start()
-
-# Load cell constants
-loadcellZero = 1.660
-loadcellTF = 0.00242304803289  # Volts per lbf
 
 # ---------- UDP SETUP ----------
 try:
@@ -55,7 +77,6 @@ except:
     except KeyboardInterrupt:
         print("cancelled")
 
-sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # ---------- InfluxDB Setup ----------
 #load in the influx db file for user token and such
@@ -93,6 +114,8 @@ query_api = client.query_api()
 
 fbombs = 0
 
+
+
 try:
     def influx_to_stm32():
         last_valve_pos = None
@@ -100,9 +123,10 @@ try:
         last_gro = None
         while True:
             try: #read data from influxdb and send to the controller
-                valve_result = query_api.query(query=query_valvePos, org=ORG)
+                #valve_result = query_api.query(query=query_valvePos, org=ORG)
                 ppr_result = query_api.query(query=query_valvePPR, org=ORG)
                 gro_result = query_api.query(query=query_valveGRO, org=ORG)
+                '''
                 for table in valve_result:
                     last_record = table.records.pop()
                     valve_pos = last_record['_value']
@@ -111,6 +135,7 @@ try:
                         message = f"VALVE,POS,{valve_pos}"
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     #print(f"Last value is: {last_record['_value']}")
+'''
                 if ppr_result:
                     for table in ppr_result:
                         ppr = (table.records.pop())['_value']
@@ -136,8 +161,12 @@ try:
                 continue
             time.sleep(0.1)
     
+
+
     read_influx_t = threading.Thread(target=influx_to_stm32, daemon=True)
     read_influx_t.start()
+
+    
 
     while True:
         try: #read data from ethernet connection and upload to influxdb

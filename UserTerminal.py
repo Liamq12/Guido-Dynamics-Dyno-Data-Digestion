@@ -321,8 +321,18 @@ class TerminalInterface:
             self.button_status = (f"Error parsing packet:", e)
 
     def load_run_plan(self):
+
+        if self.run_mode == "Ramp":
+            self.ipc_conn.send("Stop")
+        else:
+            self.ipc_conn.send("Stop Hold RPM")
+        self.stop_event.set()
+        self.is_ramping = False   
+        
         self.run_config = self.json_data
         self.run_mode = self.run_config.get("Mode")
+                   
+        time.sleep(0.1)
         if self.run_mode == "Ramp":
             self.start_rpm = int(self.run_config.get("Start"))
             self.end_rpm = int(self.run_config.get("End"))
@@ -337,8 +347,6 @@ class TerminalInterface:
             self.start_rpm = int(self.run_config.get("RPM"))
             self.ipc_conn.send("Start RPM")
             self.ipc_conn.send(self.start_rpm/self.gear_ratio)
-            self.ipc_conn.send("Rate")
-            self.ipc_conn.send(0)
 
     def make_influx_config_token(self):
         """Create input form view"""
@@ -678,7 +686,17 @@ class TerminalInterface:
                                                 self.ramp_t = threading.Thread(target=self.valve_pos_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
                                                 self.ramp_t.start()
                                         else:
-                                            self.send_valve_pos(self.start_rpm)
+                                            if(self.is_ramping):
+                                                self.ipc_conn.send("Stop Hold RPM")
+                                                self.stop_event.set()
+                                                self.is_ramping = False
+                                            else:
+                                                self.send_valve_pos(self.start_rpm)
+                                                self.ipc_conn.send("Start Hold RPM")
+                                                self.is_ramping = True
+                                                self.stop_event.clear()
+                                            
+                                            
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
