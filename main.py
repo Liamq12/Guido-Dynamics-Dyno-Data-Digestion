@@ -118,6 +118,7 @@ def influx_to_stm32():
     last_valve_pos = None
     last_ppr = None
     last_gro = None
+    last_gr = None
     while True:
         try: #read data from influxdb and send to the controller
             #valve_result = query_api.query(query=query_valvePos, org=ORG)
@@ -158,8 +159,10 @@ def influx_to_stm32():
             if gr_result:
                 for table in gr_result:
                     gr = (table.records.pop())['_value']
-                    print(f"gear ratio updated: {gr}")
-                    gr_queue.put(gr)
+                    if(gr != last_gr):
+                        last_gr = gr
+                        print(f"gear ratio updated: {gr}")
+                        gr_queue.put(gr)
         except Exception as e:
             print("Unexpected error: ")
             print(e)
@@ -185,8 +188,45 @@ except:
     try:
         while True:
             time.sleep(1)
+            if not gr_queue.empty():
+                gr = gr_queue.get()
+            #print(f'GR: {gr}')
+            value = 1000
+            device = 'test'
+            unit = 'rpm'
+
+            rollerSpeed = value
+            engineSpeed = value*gr
+            turbineSpeed = value*5/4
+            roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
+            speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+            speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+            loadValue = 0
+
+            for i in range(0,len(speedLabels)):
+                if(speedLabels[i] == 'roadSpeed'):
+                    unit = 'mph'
+                else:
+                    unit = 'rpm'
+                point = (
+                    Point(speedLabels[i])
+                    .tag("device", device)
+                    .tag("unit", unit)
+                    .field("value", float(speedValues[i]))
+                    )
+                write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
+                Point("power")
+                .tag("device", device)
+                .tag("unit", "HP")
+                .field("value", float(loadValue*turbineSpeed))
+            )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
     except KeyboardInterrupt:
         print("cancelled")
+    except Exception as e:
+        print(e)
 
 try:
     while True:
@@ -231,12 +271,27 @@ try:
                     value = value * 1.6466 - 0.1198
                     loadValue = value
                 elif(metric == "wheelSpeed"):
-                    value = value*gr
+                    rollerSpeed = value
+                    engineSpeed = value*gr
+                    turbineSpeed = value*5/4
+                    roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
+                    speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+                    speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+
+                    for i in range(0,len(speedLabels)):
+                        point = (
+                        Point(speedLabels[i])
+                        .tag("device", device)
+                        .tag("unit", unit)
+                        .field("value", float(speedValues[i]))
+                        )
+                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+
                     point = (
                         Point("power")
                         .tag("device", device)
                         .tag("unit", "HP")
-                        .field("value", float(loadValue*value))
+                        .field("value", float(loadValue*turbineSpeed))
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
                 try:
