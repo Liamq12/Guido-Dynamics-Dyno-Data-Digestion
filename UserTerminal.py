@@ -561,6 +561,9 @@ class TerminalInterface:
             self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
             print(f"Wrote: {metric}={value} {unit}")
             self.current_valve_pos = value
+
+            self.ipc_conn.send("ValvePos")
+            self.ipc_conn.send(value)
         except Exception as e:
             print(f"Error writing {metric}: {e}")
 

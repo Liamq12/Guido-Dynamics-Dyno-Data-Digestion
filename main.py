@@ -105,6 +105,12 @@ def IPC(conn):
                 message = f"ENPID,RPM,0"
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            elif msg == "ValvePos":
+                pos = conn.recv()
+                print(f"Setting valve pos: {pos}")
+                message = f"VALVE,POS,{pos}"     
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
 
 def influx_to_stm32():
     last_valve_pos = None
