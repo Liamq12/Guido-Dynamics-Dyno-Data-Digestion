@@ -3,6 +3,7 @@ from influxdb_client import InfluxDBClient, Point, WriteOptions
 import os
 import threading
 from multiprocessing.connection import Listener
+import queue
 import multiprocessing.connection
 
 UDP_IP = "192.168.0.2"
@@ -60,6 +61,7 @@ query_vehicleGR = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn:
 query_api = client.query_api()
 
 gr = 1
+gr_queue = queue.Queue()
 
 fbombs = 0
 
@@ -156,6 +158,8 @@ def influx_to_stm32():
             if gr_result:
                 for table in gr_result:
                     gr = (table.records.pop())['_value']
+                    print(f"gear ratio updated: {gr}")
+                    gr_queue.put(gr)
         except Exception as e:
             print("Unexpected error: ")
             print(e)
@@ -186,8 +190,10 @@ except:
 
 try:
     while True:
-
         try: #read data from ethernet connection and upload to influxdb
+            if not gr_queue.empty():
+                gr = gr_queue.get()
+
             data, addr = sock.recvfrom(4096)
             raw = data.decode("utf-8").strip()
             raw = raw.replace("inf", "-1")

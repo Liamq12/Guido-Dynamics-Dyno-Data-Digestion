@@ -711,7 +711,7 @@ class TerminalInterface:
                                     elif self.active_tab == 2: #gear sync tab
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
-                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "Speed")'
+                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "wheelSpeed")'
                                         speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
                                         self.gr_calc = 'trying to query speed'
                                         if speed_result:
