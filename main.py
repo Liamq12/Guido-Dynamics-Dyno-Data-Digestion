@@ -222,8 +222,10 @@ try:
                 # Load cell conversion
                 if metric == "dynoLoad":
                     value = (value - loadcellZero) / loadcellTF
+                    value = value * 1.6466 - 0.1198
                     loadValue = value
                 elif(metric == "wheelSpeed"):
+                    value = value*gr
                     point = (
                         Point("power")
                         .tag("device", device)
@@ -231,16 +233,6 @@ try:
                         .field("value", float(loadValue*value))
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-                    point = (
-                        Point("Speed")
-                        .tag("device", device)
-                        .tag("unit", "RPM")
-                        .field("value", float(value*gr))
-                    )
-
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
-
                 try:
                     point = (
                         Point(metric)
