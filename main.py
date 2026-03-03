@@ -20,7 +20,7 @@ udp_connection = False
 
 # Load cell constants
 loadcellZero = 1.660
-loadcellTF = 0.00242304803289  # Volts per lbf
+loadcellTF = 0.002  # Volts per lbf
 
 sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -59,7 +59,7 @@ query_valveGRO = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn: 
 query_vehicleGR = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "GearRatio")' #setup query for vehicle gear ratio from influxdb
 query_api = client.query_api()
 
-gr = None
+gr = 1
 
 fbombs = 0
 

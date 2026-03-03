@@ -563,6 +563,7 @@ class TerminalInterface:
             self.current_valve_pos = value
 
             self.ipc_conn.send("ValvePos")
+            time.sleep(0.05)
             self.ipc_conn.send(value)
         except Exception as e:
             print(f"Error writing {metric}: {e}")
