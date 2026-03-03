@@ -1,3 +1,4 @@
 /test.py
 /configs/influxdb.json
 /configs/~influxdb.json
+configs/System/influxdb.json
