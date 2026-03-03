@@ -546,6 +546,23 @@ class TerminalInterface:
                 self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
                 self.influx_json_read = True
 
+    def send_target_rpm(self, rpm):
+        try:
+            metric = "targetRPM"
+            device = "terminal"
+            unit = "rpm"
+            value = rpm
+            point = (
+                    Point(metric)
+                    .tag("device", device)
+                    .tag("unit", unit)
+                    .field("value", float(value))
+                    )
+            self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
+            print(f"Wrote: {metric}={value} {unit}")
+        except Exception as e:
+            print(f"Error writing {metric}: {e}")
+
     def send_valve_pos(self, valve_pos):
         try:
             metric = "ValvePos"
@@ -561,10 +578,14 @@ class TerminalInterface:
             self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
             print(f"Wrote: {metric}={value} {unit}")
             self.current_valve_pos = value
+
+            self.ipc_conn.send("ValvePos")
+            time.sleep(0.05)
+            self.ipc_conn.send(value)
         except Exception as e:
             print(f"Error writing {metric}: {e}")
 
-    def valve_pos_ramp(self, start, end, rate, loop = False):
+    def target_rpm_ramp(self, start, end, rate, loop = False):
         valve_pos = start
         prev_time = time.time()
         while (valve_pos < end and not self.stop_event.is_set()):
@@ -573,7 +594,7 @@ class TerminalInterface:
             valve_pos = valve_pos + rate*dt
             if(valve_pos > end):
                 valve_pos = end
-            self.send_valve_pos(valve_pos)
+            self.send_target_rpm(valve_pos)
             prev_time = ct
             time.sleep(0.1)
         self.is_ramping = False
@@ -692,7 +713,7 @@ class TerminalInterface:
                                                 end_rpm = self.end_rpm
                                                 ramp_rate = self.ramp_rate
                                                 self.stop_event.clear()
-                                                self.ramp_t = threading.Thread(target=self.valve_pos_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
+                                                self.ramp_t = threading.Thread(target=self.target_rpm_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
                                                 self.ramp_t.start()
                                         else:
                                             if(self.is_ramping):
@@ -700,14 +721,14 @@ class TerminalInterface:
                                                 self.stop_event.set()
                                                 self.is_ramping = False
                                             else:
-                                                self.send_valve_pos(self.start_rpm)
+                                                self.send_target_rpm(self.start_rpm)
                                                 self.ipc_conn.send("Start Hold RPM")
                                                 self.is_ramping = True
                                                 self.stop_event.clear()
                                     elif self.active_tab == 2: #gear sync tab
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
-                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "Speed")'
+                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "wheelSpeed")'
                                         speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
                                         self.gr_calc = 'trying to query speed'
                                         if speed_result:

@@ -3,6 +3,7 @@ from influxdb_client import InfluxDBClient, Point, WriteOptions
 import os
 import threading
 from multiprocessing.connection import Listener
+import queue
 import multiprocessing.connection
 
 UDP_IP = "192.168.0.2"
@@ -20,7 +21,7 @@ udp_connection = False
 
 # Load cell constants
 loadcellZero = 1.660
-loadcellTF = 0.00242304803289  # Volts per lbf
+loadcellTF = 0.002  # Volts per lbf
 
 sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -59,7 +60,8 @@ query_valveGRO = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn: 
 query_vehicleGR = f'from(bucket: "{BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "GearRatio")' #setup query for vehicle gear ratio from influxdb
 query_api = client.query_api()
 
-gr = None
+gr = 1
+gr_queue = queue.Queue()
 
 fbombs = 0
 
@@ -105,11 +107,18 @@ def IPC(conn):
                 message = f"ENPID,RPM,0"
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            elif msg == "ValvePos":
+                pos = conn.recv()
+                print(f"Setting valve pos: {pos}")
+                message = f"VALVE,POS,{pos}"     
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
 
 def influx_to_stm32():
     last_valve_pos = None
     last_ppr = None
     last_gro = None
+    last_gr = None
     while True:
         try: #read data from influxdb and send to the controller
             #valve_result = query_api.query(query=query_valvePos, org=ORG)
@@ -150,6 +159,10 @@ def influx_to_stm32():
             if gr_result:
                 for table in gr_result:
                     gr = (table.records.pop())['_value']
+                    if(gr != last_gr):
+                        last_gr = gr
+                        print(f"gear ratio updated: {gr}")
+                        gr_queue.put(gr)
         except Exception as e:
             print("Unexpected error: ")
             print(e)
@@ -175,13 +188,52 @@ except:
     try:
         while True:
             time.sleep(1)
+            if not gr_queue.empty():
+                gr = gr_queue.get()
+            #print(f'GR: {gr}')
+            value = 1000
+            device = 'test'
+            unit = 'rpm'
+
+            rollerSpeed = value
+            engineSpeed = value*gr
+            turbineSpeed = value*5/4
+            roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
+            speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+            speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+            loadValue = 0
+
+            for i in range(0,len(speedLabels)):
+                if(speedLabels[i] == 'roadSpeed'):
+                    unit = 'mph'
+                else:
+                    unit = 'rpm'
+                point = (
+                    Point(speedLabels[i])
+                    .tag("device", device)
+                    .tag("unit", unit)
+                    .field("value", float(speedValues[i]))
+                    )
+                write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
+                Point("power")
+                .tag("device", device)
+                .tag("unit", "HP")
+                .field("value", float(loadValue*turbineSpeed))
+            )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
     except KeyboardInterrupt:
         print("cancelled")
+    except Exception as e:
+        print(e)
 
 try:
     while True:
-
         try: #read data from ethernet connection and upload to influxdb
+            if not gr_queue.empty():
+                gr = gr_queue.get()
+
             data, addr = sock.recvfrom(4096)
             raw = data.decode("utf-8").strip()
             raw = raw.replace("inf", "-1")
@@ -216,25 +268,32 @@ try:
                 # Load cell conversion
                 if metric == "dynoLoad":
                     value = (value - loadcellZero) / loadcellTF
+                    value = value * 1.6466 - 0.1198
                     loadValue = value
                 elif(metric == "wheelSpeed"):
+                    rollerSpeed = value
+                    engineSpeed = value*gr
+                    turbineSpeed = value*5/4
+                    roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
+                    speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+                    speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+
+                    for i in range(0,len(speedLabels)):
+                        point = (
+                        Point(speedLabels[i])
+                        .tag("device", device)
+                        .tag("unit", unit)
+                        .field("value", float(speedValues[i]))
+                        )
+                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+
                     point = (
                         Point("power")
                         .tag("device", device)
                         .tag("unit", "HP")
-                        .field("value", float(loadValue*value))
+                        .field("value", float(loadValue*turbineSpeed))
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-                    point = (
-                        Point("Speed")
-                        .tag("device", device)
-                        .tag("unit", "RPM")
-                        .field("value", float(value*gr))
-                    )
-
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
-
                 try:
                     point = (
                         Point(metric)
