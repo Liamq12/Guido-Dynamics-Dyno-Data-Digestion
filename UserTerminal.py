@@ -49,6 +49,8 @@ class TerminalInterface:
         self.ramp_rate = None
         self.current_valve_pos = 0
 
+        self.gr_calc = 0
+
         self.is_ramping = False
         self.stop_event = threading.Event()
 
@@ -64,6 +66,7 @@ class TerminalInterface:
                 self.BUCKET = self.json_data.get("Bucket")
                 self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
                 self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                self.query_api = self.client.query_api()
                 self.influx_json_read = True
         except Exception as e:
             self.influx_json_read = False
@@ -311,18 +314,32 @@ class TerminalInterface:
                 Point("GearRatio")
                 .tag("device", "CMD")
                 .tag("unit", "Text")
-                .field("value", self.json_data.get("Gear Ratio"))
+                .field("value", float(self.gear_ratio))
             )
 
             self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=self.point)
+
+            if(self.json_data.get("Mode") != None):
+                self.load_run_plan()
+            
 
         except Exception as e:
             print("Error parsing packet:", e)
             self.button_status = (f"Error parsing packet:", e)
 
     def load_run_plan(self):
+
+        if self.run_mode == "Ramp":
+            self.ipc_conn.send("Stop")
+        else:
+            self.ipc_conn.send("Stop Hold RPM")
+        self.stop_event.set()
+        self.is_ramping = False   
+        
         self.run_config = self.json_data
         self.run_mode = self.run_config.get("Mode")
+                   
+        time.sleep(0.1)
         if self.run_mode == "Ramp":
             self.start_rpm = int(self.run_config.get("Start"))
             self.end_rpm = int(self.run_config.get("End"))
@@ -337,8 +354,6 @@ class TerminalInterface:
             self.start_rpm = int(self.run_config.get("RPM"))
             self.ipc_conn.send("Start RPM")
             self.ipc_conn.send(self.start_rpm/self.gear_ratio)
-            self.ipc_conn.send("Rate")
-            self.ipc_conn.send(0)
 
     def make_influx_config_token(self):
         """Create input form view"""
@@ -418,6 +433,8 @@ class TerminalInterface:
         # Input field display
         input_display = f"[cyan]> {self.input_value}_[/cyan]" if len(self.input_value) < 20 else f"[cyan]> {self.input_value}[/cyan]"
         content.append(f"  {input_display}\n")
+        content.append(f"Calculated Gear Ratio: {self.gr_calc}\n")
+        content.append(f"Loaded Gear Ratio: {self.gear_ratio}\n")
         
         return Panel("\n".join(content), title="Input", style="green")
     
@@ -678,7 +695,28 @@ class TerminalInterface:
                                                 self.ramp_t = threading.Thread(target=self.valve_pos_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
                                                 self.ramp_t.start()
                                         else:
-                                            self.send_valve_pos(self.start_rpm)
+                                            if(self.is_ramping):
+                                                self.ipc_conn.send("Stop Hold RPM")
+                                                self.stop_event.set()
+                                                self.is_ramping = False
+                                            else:
+                                                self.send_valve_pos(self.start_rpm)
+                                                self.ipc_conn.send("Start Hold RPM")
+                                                self.is_ramping = True
+                                                self.stop_event.clear()
+                                    elif self.active_tab == 2: #gear sync tab
+                                        self.submitted_value = self.input_value
+                                        self.input_value = ""
+                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "Speed")'
+                                        speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
+                                        self.gr_calc = 'trying to query speed'
+                                        if speed_result:
+                                            for table in speed_result:
+                                                speed = (table.records.pop())['_value']
+                                                #self.gr_calc = speed
+                                                turbine_speed = speed/self.gear_ratio
+                                                self.gr_calc = float(self.submitted_value)/turbine_speed
+
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
@@ -687,6 +725,8 @@ class TerminalInterface:
                                         self.input_value = self.input_value[:-1]
                                         self.valve_entries[self.selected_entry] = self.input_value
                                     elif self.active_tab == 4 or (self.active_tab < 0 and self.active_tab >= -3) or self.active_tab == 0:
+                                        self.input_value = self.input_value[:-1]
+                                    elif self.active_tab == 2: #gear sync tab:
                                         self.input_value = self.input_value[:-1]
                                 else:
                                     try:
@@ -701,6 +741,8 @@ class TerminalInterface:
                                             self.input_value += char
                                             self.valve_entries[self.selected_entry] = self.input_value
                                         elif self.active_tab < 0 and self.active_tab >= -3:
+                                            self.input_value += char
+                                        elif self.active_tab == 2 and (char.isdecimal() or char == '.'):
                                             self.input_value += char
                                         
                                     except:
