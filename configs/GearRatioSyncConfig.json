@@ -1,0 +1,9 @@
+{
+  "Name": "Gear Synch",
+  "Gear Ratio": 1.0,
+  "ID": "0",
+  "Version": "1.0",
+
+  "Mode": "Hold",
+  "RPM": "2500"
+}
