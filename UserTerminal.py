@@ -728,15 +728,16 @@ class TerminalInterface:
                                     elif self.active_tab == 2: #gear sync tab
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
-                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "wheelSpeed")'
+                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
                                         speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
                                         self.gr_calc = 'trying to query speed'
                                         if speed_result:
                                             for table in speed_result:
                                                 speed = (table.records.pop())['_value']
                                                 #self.gr_calc = speed
-                                                turbine_speed = speed/self.gear_ratio
-                                                self.gr_calc = float(self.submitted_value)/turbine_speed
+                                                #turbine_speed = speed/self.gear_ratio
+                                                rollerSpeed = speed
+                                                self.gr_calc = float(self.submitted_value)/rollerSpeed
 
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value

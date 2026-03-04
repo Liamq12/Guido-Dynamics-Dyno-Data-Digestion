@@ -268,7 +268,7 @@ try:
                 # Load cell conversion
                 if metric == "dynoLoad":
                     value = (value - loadcellZero) / loadcellTF
-                    value = value * 1.6466 - 0.1198
+                    value = value * 0.6066 + 0.092
                     loadValue = value
                 elif(metric == "wheelSpeed"):
                     rollerSpeed = value
@@ -279,6 +279,10 @@ try:
                     speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
 
                     for i in range(0,len(speedLabels)):
+                        if(speedLabels[i] == 'roadSpeed'):
+                            unit = 'mph'
+                        else:
+                            unit = 'rpm'
                         point = (
                         Point(speedLabels[i])
                         .tag("device", device)
