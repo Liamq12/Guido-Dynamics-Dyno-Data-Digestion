@@ -201,7 +201,7 @@ except:
             roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
             speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
             speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
-            loadValue = 0
+            loadValue = 30
 
             for i in range(0,len(speedLabels)):
                 if(speedLabels[i] == 'roadSpeed'):
@@ -220,7 +220,15 @@ except:
                 Point("power")
                 .tag("device", device)
                 .tag("unit", "HP")
-                .field("value", float(loadValue*turbineSpeed))
+                .field("value", float(loadValue*turbineSpeed/5252))
+            )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
+                Point("dynoLoad")
+                .tag("device", device)
+                .tag("unit", "ft-lbf")
+                .field("value", float(loadValue))
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
     except KeyboardInterrupt:
@@ -289,13 +297,13 @@ try:
                         .tag("unit", unit)
                         .field("value", float(speedValues[i]))
                         )
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        write_api.write(bucket=BUCKET, org=ORG, record=point)
 
                     point = (
                         Point("power")
                         .tag("device", device)
                         .tag("unit", "HP")
-                        .field("value", float(loadValue*turbineSpeed))
+                        .field("value", float(loadValue*turbineSpeed/5252))
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
                 try:
