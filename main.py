@@ -50,8 +50,7 @@ except Exception as e:
 
 client = InfluxDBClient(url=INFLUX_URL, token=TOKEN, org=ORG)
 
-
-
+engineTorque = 0
 loadValue = 0
 
 # For 10Hz: small batch, fast flush
@@ -275,6 +274,7 @@ except:
             speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
             speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
             loadValue = fake_torque_data()
+            engineTorque = loadValue*(5/4)/gr
             run_name = "None"
             if running_event.is_set():
                 if (trigger_off > trigger_on):
@@ -350,6 +350,15 @@ except:
             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
             point = (
+                Point("engineTorque")
+                .tag("device", device)
+                .tag("unit", "lbf-ft")
+                .tag("runName", run_name)
+                .field("value", float(engineTorque))
+            )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
                 Point("dynoLoad")
                 .tag("device", device)
                 .tag("unit", "ft-lbf")
@@ -417,6 +426,7 @@ try:
                     value = (value - loadcellZero) / loadcellTF
                     value = value * loadCellM + loadCellB
                     loadValue = value
+                    engineTorque = loadValue*(5/4)/gr
                 elif(metric == "wheelSpeed"):
                     if running_event.is_set():
                         if (trigger_off > trigger_on):
@@ -493,6 +503,15 @@ try:
                         .tag("unit", "HP")
                         .tag("runName", run_name)
                         .field("value", float(loadValue*turbineSpeed/5252))
+                    )
+                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+                    point = (
+                        Point("engineTorque")
+                        .tag("device", device)
+                        .tag("unit", "lbf-ft")
+                        .tag("runName", run_name)
+                        .field("value", float(engineTorque))
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
                 try:
