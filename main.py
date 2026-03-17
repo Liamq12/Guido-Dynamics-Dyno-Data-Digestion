@@ -379,6 +379,13 @@ try:
     trigger_on = 0
     run_num = 0
     config_name = "None"
+    point = (
+        Point("runData")
+        .tag("device", "CMD")
+        .tag("unit", "none")
+        .field("value", run_name)
+        )
+    write_api.write(bucket=BUCKET, org=ORG, record=point)
     while True:
         try: #read data from ethernet connection and upload to influxdb
             if not gr_queue.empty():
