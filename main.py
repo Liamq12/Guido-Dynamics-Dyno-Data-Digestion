@@ -94,6 +94,9 @@ def IPC(conn, run_num):
                 run_on_trigger_q.put(trigger_on)
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                message = f"ENPID,RPM,1"
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "End RPM":
                 rpm = conn.recv()
                 print(f"End RPM set to: {rpm}")
@@ -109,7 +112,7 @@ def IPC(conn, run_num):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "Start":
                 print("start ramp")
-                message = f"ERAMP,RPM,1"
+                message = f"FRAMP,ENA,1"
                 running_event.set()
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
