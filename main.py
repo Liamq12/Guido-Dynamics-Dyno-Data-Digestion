@@ -52,6 +52,7 @@ client = InfluxDBClient(url=INFLUX_URL, token=TOKEN, org=ORG)
 
 engineTorque = 0
 loadValue = 0
+systemAccel = 0
 
 # For 10Hz: small batch, fast flush
 write_api = client.write_api(write_options=WriteOptions(
@@ -426,7 +427,9 @@ try:
                     value = (value - loadcellZero) / loadcellTF
                     value = value * loadCellM + loadCellB
                     loadValue = value
-                    engineTorque = loadValue*(5/4)/gr
+                    engineTorque = loadValue*(5/4)/gr + momentI*systemAccel
+                elif metric == "wheelAccel":
+                    systemAccel = value*gr
                 elif(metric == "wheelSpeed"):
                     if running_event.is_set():
                         if (trigger_off > trigger_on):
@@ -503,6 +506,15 @@ try:
                         .tag("unit", "HP")
                         .tag("runName", run_name)
                         .field("value", float(loadValue*turbineSpeed/5252))
+                    )
+                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+                    point = (
+                        Point("enginePower")
+                        .tag("device", device)
+                        .tag("unit", "HP")
+                        .tag("runName", run_name)
+                        .field("value", float(engineTorque*engineSpeed/5252))
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
 
