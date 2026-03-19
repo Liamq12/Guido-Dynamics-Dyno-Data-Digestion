@@ -6,6 +6,8 @@ from multiprocessing.connection import Listener
 import queue
 import multiprocessing.connection
 import math
+import datetime
+from datetime import timedelta
 
 UDP_IP = "192.168.0.2"
 UDP_PORT = 7
@@ -81,7 +83,7 @@ run_on_trigger_q = queue.Queue()
 run_off_trigger_q = queue.Queue()
 running_event = threading.Event()
 
-def IPC(conn, run_num):
+def IPC(conn):
         #TODO setup UDP control words to send data to the processor
         trigger_on = 0
         while True:
@@ -202,7 +204,7 @@ def influx_to_stm32():
             continue
         time.sleep(1)
 
-IPC_t = threading.Thread(target=IPC, daemon=True, args=(ipc_conn,run_num))
+IPC_t = threading.Thread(target=IPC, daemon=True, args=(ipc_conn,))
 IPC_t.start()
 
 read_influx_t = threading.Thread(target=influx_to_stm32, daemon=True)
@@ -409,15 +411,21 @@ try:
             headers = parsed.get("headers", [])
             rows = parsed.get("data", [])
 
+            recieve_time = datetime.datetime.now()
+
             print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
             
             for row in rows:
                 entry = dict(zip(headers, row))
 
                 metric = entry.get("metric")
-                timestamp = entry.get("time")
                 unit = entry.get("unit")
                 value = entry.get("value")
+                cycle_back = entry.get("cycle")
+                freq = entry.get("freq")
+
+                seconds_back = cycle_back/freq
+                timestamp = recieve_time - timedelta(seconds=seconds_back)
 
                 if value is None:
                     value = -1
@@ -450,6 +458,7 @@ try:
                                     .tag("device", device)
                                     .tag("unit", "none")
                                     .field("value", run_name)
+                                    .time(timestamp)
                                     )
                                 write_api.write(bucket=BUCKET, org=ORG, record=point)
                             elif (running):
@@ -471,6 +480,7 @@ try:
                                     .tag("device", device)
                                     .tag("unit", "none")
                                     .field("value", run_name)
+                                    .time(timestamp)
                                     )
                                 write_api.write(bucket=BUCKET, org=ORG, record=point)
                             elif (running):
@@ -497,6 +507,7 @@ try:
                         .tag("unit", unit)
                         .tag("runName", run_name)
                         .field("value", float(speedValues[i]))
+                        .time(timestamp)
                         )
                         write_api.write(bucket=BUCKET, org=ORG, record=point)
 
@@ -506,6 +517,7 @@ try:
                         .tag("unit", "HP")
                         .tag("runName", run_name)
                         .field("value", float(loadValue*turbineSpeed/5252))
+                        .time(timestamp)
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
 
@@ -515,6 +527,7 @@ try:
                         .tag("unit", "HP")
                         .tag("runName", run_name)
                         .field("value", float(engineTorque*engineSpeed/5252))
+                        .time(timestamp)
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
 
@@ -524,6 +537,7 @@ try:
                         .tag("unit", "lbf-ft")
                         .tag("runName", run_name)
                         .field("value", float(engineTorque))
+                        .time(timestamp)
                     )
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
                 try:
@@ -533,6 +547,7 @@ try:
                         .tag("unit", unit)
                         .tag("runName", run_name)
                         .field("value", float(value))
+                        .time(timestamp)
                     )
 
                     write_api.write(bucket=BUCKET, org=ORG, record=point)
