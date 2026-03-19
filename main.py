@@ -96,9 +96,6 @@ def IPC(conn):
                 run_on_trigger_q.put(trigger_on)
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                message = f"ENPID,RPM,1"
-                if(udp_connection):
-                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "End RPM":
                 rpm = conn.recv()
                 print(f"End RPM set to: {rpm}")
@@ -114,7 +111,7 @@ def IPC(conn):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "Start":
                 print("start ramp")
-                message = f"FRAMP,ENA,1"
+                message = f"ERAMP,RPM,1"
                 running_event.set()
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
@@ -384,13 +381,6 @@ try:
     trigger_on = 0
     run_num = 0
     config_name = "None"
-    point = (
-        Point("runData")
-        .tag("device", "CMD")
-        .tag("unit", "none")
-        .field("value", run_name)
-        )
-    write_api.write(bucket=BUCKET, org=ORG, record=point)
     while True:
         try: #read data from ethernet connection and upload to influxdb
             if not gr_queue.empty():
