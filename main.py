@@ -417,154 +417,156 @@ try:
             device = parsed.get("device", "unknown")
             uptime = parsed.get("uptime")
             device_id = parsed.get("id")
+            data_packet = parsed.get("data")
 
-            headers = parsed.get("headers", [])
-            rows = parsed.get("data", [])
-
+            headers = data_packet.get("headers", [])
+            cycles = data_packet.get("cycles")
             recieve_time = datetime.datetime.now()
+            freq = data_packet.get("freq")
 
             print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
-            
-            for row in rows:
-                entry = dict(zip(headers, row))
 
-                metric = entry.get("metric")
-                unit = entry.get("unit")
-                value = entry.get("value")
-                cycle_back = entry.get("cycle")
-                freq = entry.get("freq")
+            for cycle in cycles:
+                rows = data_packet.get(f"data{cycle}", [])
+                for row in rows:
+                    entry = dict(zip(headers, row))
 
-                seconds_back = cycle_back/freq
-                timestamp = recieve_time - timedelta(seconds=seconds_back)
+                    metric = entry.get("metric")
+                    unit = entry.get("unit")
+                    value = entry.get("value")
+                    cycle_back = cycles - cycle
+                    
+                    seconds_back = cycle_back/freq
+                    timestamp = recieve_time - timedelta(seconds=seconds_back)
 
-                if value is None:
-                    value = -1
+                    if value is None:
+                        value = -1
 
-                # Load cell conversion
-                if metric == "dynoLoad":
-                    value = (value - loadcellZero) / loadcellTF
-                    value = value * loadCellM + loadCellB
-                    loadValue = value
-                    engineTorque = loadValue*(5/4)/gr + momentI*systemAccel
-                elif metric == "wheelAccel":
-                    systemAccel = value*gr
-                elif(metric == "wheelSpeed"):
-                    if running_event.is_set():
-                        if (trigger_off > trigger_on):
-                            if(value > trigger_off and running):
-                                running_event.clear()
+                    # Load cell conversion
+                    if metric == "dynoLoad":
+                        value = (value - loadcellZero) / loadcellTF
+                        value = value * loadCellM + loadCellB
+                        loadValue = value
+                        engineTorque = loadValue*(5/4)/gr + momentI*systemAccel
+                    elif metric == "wheelAccel":
+                        systemAccel = value*gr
+                    elif(metric == "wheelSpeed"):
+                        if running_event.is_set():
+                            if (trigger_off > trigger_on):
+                                if(value > trigger_off and running):
+                                    running_event.clear()
+                                    running = False
+                                    run_name = "None"
+                                    print(f"Run Turned Off. On trigger is: {trigger_on}")
+                                elif (value > trigger_off and not running):
+                                    run_name = "None"
+                                elif (value > trigger_on and not running):
+                                    run_num += 1
+                                    running = True
+                                    run_name = f"{config_name}_{run_num}"
+                                    print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
+                                    point = (
+                                        Point("runData")
+                                        .tag("device", device)
+                                        .tag("unit", "none")
+                                        .field("value", run_name)
+                                        .time(timestamp)
+                                        )
+                                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+                                elif (running):
+                                    run_name = f"{config_name}_{run_num}"
+                            else:
+                                if(value < trigger_off and running):
+                                    running = False
+                                    run_name = "None"
+                                    print(f"Run Turned Off. On trigger is: {trigger_on}")
+                                elif (value < trigger_off and not running):
+                                    run_name = "None"
+                                elif (value > trigger_on and not running):
+                                    run_num += 1
+                                    running = True
+                                    run_name = f"{config_name}_{run_num}"
+                                    print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
+                                    point = (
+                                        Point("runData")
+                                        .tag("device", device)
+                                        .tag("unit", "none")
+                                        .field("value", run_name)
+                                        .time(timestamp)
+                                        )
+                                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+                                elif (running):
+                                    run_name = f"{config_name}_{run_num}"
+                        else:
+                            if running:
                                 running = False
                                 run_name = "None"
-                                print(f"Run Turned Off. On trigger is: {trigger_on}")
-                            elif (value > trigger_off and not running):
-                                run_name = "None"
-                            elif (value > trigger_on and not running):
-                                run_num += 1
-                                running = True
-                                run_name = f"{config_name}_{run_num}"
-                                print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
-                                point = (
-                                    Point("runData")
-                                    .tag("device", device)
-                                    .tag("unit", "none")
-                                    .field("value", run_name)
-                                    .time(timestamp)
-                                    )
-                                write_api.write(bucket=BUCKET, org=ORG, record=point)
-                            elif (running):
-                                run_name = f"{config_name}_{run_num}"
-                        else:
-                            if(value < trigger_off and running):
-                                running = False
-                                run_name = "None"
-                                print(f"Run Turned Off. On trigger is: {trigger_on}")
-                            elif (value < trigger_off and not running):
-                                run_name = "None"
-                            elif (value > trigger_on and not running):
-                                run_num += 1
-                                running = True
-                                run_name = f"{config_name}_{run_num}"
-                                print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
-                                point = (
-                                    Point("runData")
-                                    .tag("device", device)
-                                    .tag("unit", "none")
-                                    .field("value", run_name)
-                                    .time(timestamp)
-                                    )
-                                write_api.write(bucket=BUCKET, org=ORG, record=point)
-                            elif (running):
-                                run_name = f"{config_name}_{run_num}"
-                    else:
-                        if running:
-                            running = False
-                            run_name = "None"
-                    rollerSpeed = value
-                    engineSpeed = value*gr
-                    turbineSpeed = value*5/4
-                    roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
-                    speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
-                    speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+                        rollerSpeed = value
+                        engineSpeed = value*gr
+                        turbineSpeed = value*5/4
+                        roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
+                        speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+                        speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
 
-                    for i in range(0,len(speedLabels)):
-                        if(speedLabels[i] == 'roadSpeed'):
-                            unit = 'mph'
-                        else:
-                            unit = 'rpm'
+                        for i in range(0,len(speedLabels)):
+                            if(speedLabels[i] == 'roadSpeed'):
+                                unit = 'mph'
+                            else:
+                                unit = 'rpm'
+                            point = (
+                            Point(speedLabels[i])
+                            .tag("device", device)
+                            .tag("unit", unit)
+                            .tag("runName", run_name)
+                            .field("value", float(speedValues[i]))
+                            .time(timestamp)
+                            )
+                            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
                         point = (
-                        Point(speedLabels[i])
-                        .tag("device", device)
-                        .tag("unit", unit)
-                        .tag("runName", run_name)
-                        .field("value", float(speedValues[i]))
-                        .time(timestamp)
+                            Point("power")
+                            .tag("device", device)
+                            .tag("unit", "HP")
+                            .tag("runName", run_name)
+                            .field("value", float(loadValue*turbineSpeed/5252))
+                            .time(timestamp)
                         )
                         write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-                    point = (
-                        Point("power")
-                        .tag("device", device)
-                        .tag("unit", "HP")
-                        .tag("runName", run_name)
-                        .field("value", float(loadValue*turbineSpeed/5252))
-                        .time(timestamp)
-                    )
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        point = (
+                            Point("enginePower")
+                            .tag("device", device)
+                            .tag("unit", "HP")
+                            .tag("runName", run_name)
+                            .field("value", float(engineTorque*engineSpeed/5252))
+                            .time(timestamp)
+                        )
+                        write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-                    point = (
-                        Point("enginePower")
-                        .tag("device", device)
-                        .tag("unit", "HP")
-                        .tag("runName", run_name)
-                        .field("value", float(engineTorque*engineSpeed/5252))
-                        .time(timestamp)
-                    )
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        point = (
+                            Point("engineTorque")
+                            .tag("device", device)
+                            .tag("unit", "lbf-ft")
+                            .tag("runName", run_name)
+                            .field("value", float(engineTorque))
+                            .time(timestamp)
+                        )
+                        write_api.write(bucket=BUCKET, org=ORG, record=point)
+                    try:
+                        point = (
+                            Point(metric)
+                            .tag("device", device)
+                            .tag("unit", unit)
+                            .tag("runName", run_name)
+                            .field("value", float(value))
+                            .time(timestamp)
+                        )
 
-                    point = (
-                        Point("engineTorque")
-                        .tag("device", device)
-                        .tag("unit", "lbf-ft")
-                        .tag("runName", run_name)
-                        .field("value", float(engineTorque))
-                        .time(timestamp)
-                    )
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
-                try:
-                    point = (
-                        Point(metric)
-                        .tag("device", device)
-                        .tag("unit", unit)
-                        .tag("runName", run_name)
-                        .field("value", float(value))
-                        .time(timestamp)
-                    )
+                        write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        print(f"Wrote: {metric}={value} {unit}")
 
-                    write_api.write(bucket=BUCKET, org=ORG, record=point)
-                    print(f"Wrote: {metric}={value} {unit}")
-
-                except Exception as e:
-                    print(f"Error writing {metric}: {e}")
+                    except Exception as e:
+                        print(f"Error writing {metric}: {e}")
 
             # dumb fun metric
             if random.randint(1, 33) == 2:
