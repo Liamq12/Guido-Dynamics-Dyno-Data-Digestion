@@ -14,6 +14,7 @@ rem -- Make sure user has influx db
 python -m pip install influxdb-client
 python -m pip install rich
 python -m pip install tk
+python -m pip install pytz
 
 rem --- Start InfluxDB and Grafana in separate windows ---
 start "" "%SCRIPT_DIR%influxdb2-2.7.12-windows\influxd.exe"
