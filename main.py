@@ -6,8 +6,8 @@ from multiprocessing.connection import Listener
 import queue
 import multiprocessing.connection
 import math
-import datetime
-from datetime import timedelta
+import pytz
+from datetime import timedelta, timezone, datetime
 
 UDP_IP = "192.168.0.2"
 UDP_PORT = 7
@@ -403,7 +403,7 @@ try:
             if not run_off_trigger_q.empty():
                 trigger_off = run_off_trigger_q.get()
 
-            data, addr = sock.recvfrom(4096)
+            data, addr = sock.recvfrom(16384)
             raw = data.decode("utf-8").strip()
             raw = raw.replace("inf", "-1")
             print(f"Received from {addr}: {raw}")
@@ -421,12 +421,13 @@ try:
 
             headers = data_packet.get("headers", [])
             cycles = data_packet.get("cycles")
-            recieve_time = datetime.datetime.now()
+            # recieve_time = datetime.datetime.now() # This time format is not supported by influxdb, need utc olson tz format
+            recieve_time = datetime.now(pytz.timezone("America/Denver"))
             freq = data_packet.get("freq")
 
             print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
 
-            for cycle in cycles:
+            for cycle in range(cycles):
                 rows = data_packet.get(f"data{cycle}", [])
                 for row in rows:
                     entry = dict(zip(headers, row))
@@ -444,6 +445,7 @@ try:
 
                     # Load cell conversion
                     if metric == "dynoLoad":
+                        print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF
                         value = value * loadCellM + loadCellB
                         loadValue = value
@@ -563,7 +565,7 @@ try:
                         )
 
                         write_api.write(bucket=BUCKET, org=ORG, record=point)
-                        print(f"Wrote: {metric}={value} {unit}")
+                        print(f"Wrote: {metric}={float(value)} {unit} @ {timestamp} @ {cycle} @ {seconds_back}")
 
                     except Exception as e:
                         print(f"Error writing {metric}: {e}")
