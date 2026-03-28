@@ -466,7 +466,7 @@ try:
                     entry = dict(zip(headers, row))
 
                     metric = entry.get("metric")
-                    unit = entry.get("unit")
+                    # unit = entry.get("unit") # Removed due to ethernet packet limitations
                     value = entry.get("value")
                     cycle_back = cycles - cycle
                     
@@ -477,15 +477,22 @@ try:
                         value = -1
 
                     # Load cell conversion
-                    if metric == "dynoLoad":
+                    if metric == "dyLd":
+                        metric = "dynoLoad" # Real name
                         print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         value = value * loadCellM + loadCellB #mx+b equation from torque wrench callibration. These values are in the mechanical config json
                         loadValue = value #save load cell value for power calculation
                         engineTorque = loadValue*(5/4)/gr + momentI*systemAccel #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
-                    elif metric == "wheelAccel":
+                    elif metric == "acel":
+                        metric = "wheelAccel"
                         systemAccel = value*gr #TODO check units for this
-                    elif(metric == "wheelSpeed"): #a lot of logic gets done here with the wheel speed metric
+                    elif metric == "RPMT":
+                        metric = "RPMTarget"
+                    elif metric == "vPos":
+                        metric = "valvePos"
+                    elif(metric == "rSpd"): #a lot of logic gets done here with the wheel speed metric
+                        metric = "wheelSpeed" # Real name
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
                             if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
@@ -605,7 +612,7 @@ try:
                         )
 
                         write_api.write(bucket=BUCKET, org=ORG, record=point)
-                        print(f"Wrote: {metric}={float(value)} {unit} @ {timestamp} @ {cycle} @ {seconds_back}")
+                        # print(f"Wrote: {metric}={float(value)} {unit} @ {timestamp} @ {cycle} @ {seconds_back}")
 
                     except Exception as e:
                         print(f"Error writing {metric}: {e}")
