@@ -1,0 +1,12 @@
+{
+  "Name": "Example",
+  "Gear Ratio": 6.767,
+  "ID": "c1b6e2c4-8c5d-4a3e-9f42-1a7d3c6f9a98",
+  "Version": "1.0.0",
+
+  "Mode": "Ramp",
+  "Start": "4000",
+  "End": "6000",
+  "Rate": "200",
+  "StopMode": "Hold"
+}
