@@ -476,7 +476,7 @@ try:
                 Point("ambPressure")
                 .tag("device", device)
                 .tag("unit", "hPa")
-                .field("value", pressure)
+                .field("value", pressure/100) # Convert from pascals to hPa
                 .time(timestamp)
                 )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
