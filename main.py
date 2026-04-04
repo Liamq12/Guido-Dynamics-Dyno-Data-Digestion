@@ -421,6 +421,12 @@ try:
         .field("value", run_name)
         )
     write_api.write(bucket=BUCKET, org=ORG, record=point) #post blank run data to make sure we don't have null value problems
+    
+    a_est = 0
+    w_est = 0
+    T_filtered_prev = 0
+    alpha = 0.2
+    beta = 0.02
     while True:
         try: #read data from ethernet connection and upload to influxdb
             #check queues to see if the variable have been updated in another thread
@@ -457,6 +463,8 @@ try:
             # recieve_time = datetime.datetime.now() # This time format is not supported by influxdb, need utc olson tz format
             recieve_time = datetime.now(pytz.timezone("America/Denver"))
             freq = data_packet.get("freq")
+            dt = 1/freq
+            tau = dt / (0.1 + dt)
 
             print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
 
@@ -483,10 +491,9 @@ try:
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         value = value * loadCellM + loadCellB #mx+b equation from torque wrench callibration. These values are in the mechanical config json
                         loadValue = value #save load cell value for power calculation
-                        engineTorque = loadValue*(5/4)/gr + momentI*systemAccel #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
                     elif metric == "acel":
                         metric = "wheelAccel"
-                        systemAccel = value*gr #TODO check units for this
+                        #systemAccel = value*gr #TODO check units for this
                     elif metric == "RPMT":
                         metric = "RPMTarget"
                     elif metric == "vPos":
@@ -550,13 +557,24 @@ try:
                                 running = False
                                 run_name = "None"
                         #calculate all the rotational speeds. Assign each speed a label and value
-                        rollerSpeed = value
-                        engineSpeed = value*gr
-                        turbineSpeed = value*5/4
-                        roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
-                        speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
-                        speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+                        rawSpeed = value
+                        w_measured = rawSpeed
+                        innovation = w_measured - w_est - a_est * dt
+                        w_est = w_est + a_est * dt + alpha * innovation
+                        a_est = a_est + beta * innovation / dt
+                        rollerSpeed = w_est
+                        systemAccel = a_est
 
+                        T_filtered = tau * loadValue + (1 - tau) * T_filtered_prev
+                        T_filtered_prev = T_filtered
+
+                        engineSpeed = rollerSpeed*gr
+                        turbineSpeed = rollerSpeed*5/4
+                        roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
+                        speedLabels = ['rawSpeed' 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+                        speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+                        engineTorque = (T_filtered*(5/4) + momentI*systemAccel)/gr #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
+                        
                         for i in range(0,len(speedLabels)): #iterate through all of the speeds and push them to influx
                             if(speedLabels[i] == 'roadSpeed'):
                                 unit = 'mph'
