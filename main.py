@@ -498,6 +498,38 @@ try:
             # recieve_time = datetime.datetime.now() # This time format is not supported by influxdb, need utc olson tz format
             recieve_time = datetime.now(pytz.timezone("America/Denver"))
             freq = data_packet.get("freq")
+            temp = data_packet.get("tmp")
+            pressure = data_packet.get("prs")
+            humidity = data_packet.get("hum")
+            timestamp = recieve_time - timedelta(seconds=0.5) # compensate and sync data for how the STM32 calculates temp, pres, humidity
+
+            # Post temp, pressure, humidity data point to influx. Lazy way, will refactor later
+            point = (
+                Point("ambTemp")
+                .tag("device", device)
+                .tag("unit", "C")
+                .field("value", temp)
+                .time(timestamp)
+                )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
+                Point("ambPressure")
+                .tag("device", device)
+                .tag("unit", "hPa")
+                .field("value", pressure/100) # Convert from pascals to hPa
+                .time(timestamp)
+                )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
+                Point("ambHumidity")
+                .tag("device", device)
+                .tag("unit", "none")
+                .field("value", humidity)
+                .time(timestamp)
+                )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
             dt = 1/freq
             tau = dt / (0.1 + dt)
 
