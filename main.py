@@ -88,7 +88,9 @@ run_num = 0
 #queue and event for threads that's used to determine when data should be batched into runs
 run_on_trigger_q = queue.Queue()
 run_off_trigger_q = queue.Queue()
+start_rpm_q = queue.Queue()
 running_event = threading.Event()
+run_started = threading.Event()
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
@@ -100,8 +102,9 @@ def IPC(conn):
                 rpm = conn.recv()
                 print(f"Start RPM set to: {rpm}")
                 message = f"COPID,RPM,{rpm}"
-                trigger_on = rpm*0.75
+                trigger_on = rpm*0.9
                 run_on_trigger_q.put(trigger_on)
+                start_rpm_q.put(rpm)
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                 message = f"ENPID,RPM,1"
@@ -127,6 +130,7 @@ def IPC(conn):
                 print("start ramp")
                 message = f"FRAMP,ENA,1"
                 running_event.set()
+                run_started.set()
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             #command to stop the ramp - TODO not implemented in controller yet
@@ -265,8 +269,8 @@ except:
         a_est = 0
         w_est = 0
         T_filtered_prev = 0
-        alpha = 0.2
-        beta = 0.02
+        alpha = 0.4
+        beta = 0.1
         #creates functions to generate fake torque and speed data for debug
         def fake_speed_data():
             now = time.time()
@@ -447,6 +451,7 @@ try:
     run_name = "None"
     trigger_off = 0
     trigger_on = 0
+    start_rpm = 0
     run_num = 0
     config_name = "None"
     point = (
@@ -460,13 +465,15 @@ try:
     a_est = 0
     w_est = 0
     T_filtered_prev = 0
-    alpha = 0.2
-    beta = 0.02
+    alpha = 0.4
+    beta = 0.1
     while True:
         try: #read data from ethernet connection and upload to influxdb
             #check queues to see if the variable have been updated in another thread
             if not gr_queue.empty():
                 gr = gr_queue.get()
+            if not start_rpm_q.empty():
+                start_rpm = start_rpm_q.get()
             if not config_queue.empty():
                 config_name = config_queue.get()
                 run_num = get_last_pull_num(config_name)
@@ -623,6 +630,15 @@ try:
                             if running: #the running flag was disabled so we will stop the current run
                                 running = False
                                 run_name = "None"
+                        if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
+                            run_started.clear()
+                            message = f"COPID,RPM,{start_rpm}"
+                            if(udp_connection):
+                                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                            message = f"ENPID,RPM,1"
+                            if(udp_connection):
+                                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                            
                         #calculate all the rotational speeds. Assign each speed a label and value
                         rawSpeed = value
                         w_measured = rawSpeed

@@ -159,14 +159,11 @@ class TerminalInterface:
         return Panel(menu_text, style="green")
     
     def get_last_speed(self):
-        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -1s) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
+        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -500ms) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
         speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
-        self.gr_calc = 'trying to query speed'
         if speed_result:
             for table in speed_result:
                 speed = (table.records.pop())['_value']
-                #self.gr_calc = speed
-                #turbine_speed = speed/self.gear_ratio
                 rollerSpeed = speed
         else:
             rollerSpeed = 0
@@ -346,10 +343,7 @@ class TerminalInterface:
             print("Error parsing packet:", e)
             self.button_status = (f"Error parsing packet:", e)
 
-    def load_run_plan(self):
-        if self.run_config == None:
-            return
-        
+    def load_run_plan(self):        
         if self.run_mode == "Ramp":
             self.ipc_conn.send("Stop")
         else:
@@ -749,20 +743,8 @@ class TerminalInterface:
                                     elif self.active_tab == 2: #gear sync tab
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
-                                        '''
-                                        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
-                                        speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
-                                        self.gr_calc = 'trying to query speed'
-                                        if speed_result:
-                                            for table in speed_result:
-                                                speed = (table.records.pop())['_value']
-                                                #self.gr_calc = speed
-                                                #turbine_speed = speed/self.gear_ratio
-                                                rollerSpeed = speed
-                                                '''
                                         rollerSpeed = self.get_last_speed()
                                         self.gr_calc = float(self.submitted_value)/rollerSpeed
-
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
