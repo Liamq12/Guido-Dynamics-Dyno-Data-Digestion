@@ -259,6 +259,14 @@ except:
     udp_connection = False
     print("no connection, just chilling")
     try:
+        freq = 10
+        dt = 1/freq
+        tau = dt / (0.1 + dt)
+        a_est = 0
+        w_est = 0
+        T_filtered_prev = 0
+        alpha = 0.2
+        beta = 0.02
         #creates functions to generate fake torque and speed data for debug
         def fake_speed_data():
             now = time.time()
@@ -274,7 +282,7 @@ except:
             return torque
         #the loop of the program
         while True:
-            time.sleep(0.2)
+            time.sleep(1/freq)
             #check queues to see if the variable have been updated in another thread
             if not gr_queue.empty():
                 gr = gr_queue.get()
@@ -288,21 +296,28 @@ except:
         
             #speed is pulled from fake speed data function
             value = fake_speed_data()
+            loadValue = fake_torque_data()
             device = 'test'
             unit = 'rpm'
 
-            #calculate all rotational speeds using gear ratios
-            rollerSpeed = value
-            engineSpeed = value*gr
-            turbineSpeed = value*5/4
-            roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
-            #arrays that store the name and values of each rotational speed we care about
-            speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
-            speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
-            #generate fake torque data for debug
-            loadValue = fake_torque_data()
-            #use gear ratio to back calculate engine torque
-            engineTorque = loadValue*(5/4)/gr
+            rawSpeed = value
+            w_measured = rawSpeed
+            innovation = w_measured - w_est - a_est * dt
+            w_est = w_est + a_est * dt + alpha * innovation
+            a_est = a_est + beta * innovation / dt
+            rollerSpeed = w_est
+            systemAccel = a_est
+
+            T_filtered = tau * loadValue + (1 - tau) * T_filtered_prev
+            T_filtered_prev = T_filtered
+
+            engineSpeed = rollerSpeed*gr
+            turbineSpeed = rollerSpeed*5/4
+            roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
+            speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+            speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+            engineTorque = (T_filtered*(5/4) + momentI*systemAccel)/gr #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
+            
             #run name for batching purposes
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
@@ -374,6 +389,16 @@ except:
                     )
                 write_api.write(bucket=BUCKET, org=ORG, record=point)
 
+                
+            point = (
+                Point("wheelAccel")
+                .tag("device", device)
+                .tag("unit", "RPM/s")
+                .tag("runName", run_name)
+                .field("value", systemAccel)
+            )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
             point = (
                 Point("power")
                 .tag("device", device)
@@ -400,6 +425,16 @@ except:
                 .field("value", float(loadValue)) #post measured torque value to influx
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+            point = (
+                    Point("enginePower")
+                    .tag("device", device)
+                    .tag("unit", "HP")
+                    .tag("runName", run_name)
+                    .field("value", float(engineTorque*engineSpeed/5252))
+                )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
     except KeyboardInterrupt:
         print("cancelled")
     except Exception as e:
@@ -421,6 +456,12 @@ try:
         .field("value", run_name)
         )
     write_api.write(bucket=BUCKET, org=ORG, record=point) #post blank run data to make sure we don't have null value problems
+    
+    a_est = 0
+    w_est = 0
+    T_filtered_prev = 0
+    alpha = 0.2
+    beta = 0.02
     while True:
         try: #read data from ethernet connection and upload to influxdb
             #check queues to see if the variable have been updated in another thread
@@ -489,6 +530,8 @@ try:
                 .time(timestamp)
                 )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
+            dt = 1/freq
+            tau = dt / (0.1 + dt)
 
             print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
 
@@ -515,10 +558,9 @@ try:
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         value = value * loadCellM + loadCellB #mx+b equation from torque wrench callibration. These values are in the mechanical config json
                         loadValue = value #save load cell value for power calculation
-                        engineTorque = loadValue*(5/4)/gr + momentI*systemAccel #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
                     elif metric == "acel":
                         metric = "wheelAccel"
-                        systemAccel = value*gr #TODO check units for this
+                        #systemAccel = value*gr #TODO check units for this
                     elif metric == "RPMT":
                         metric = "RPMTarget"
                     elif metric == "vPos":
@@ -582,13 +624,24 @@ try:
                                 running = False
                                 run_name = "None"
                         #calculate all the rotational speeds. Assign each speed a label and value
-                        rollerSpeed = value
-                        engineSpeed = value*gr
-                        turbineSpeed = value*5/4
-                        roadSpeed = (value*(2*3.14159/60)*4.5)/17.6
-                        speedLabels = ['rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
-                        speedValues = [rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+                        rawSpeed = value
+                        w_measured = rawSpeed
+                        innovation = w_measured - w_est - a_est * dt
+                        w_est = w_est + a_est * dt + alpha * innovation
+                        a_est = a_est + beta * innovation / dt
+                        rollerSpeed = w_est
+                        systemAccel = a_est
 
+                        T_filtered = tau * loadValue + (1 - tau) * T_filtered_prev
+                        T_filtered_prev = T_filtered
+
+                        engineSpeed = rollerSpeed*gr
+                        turbineSpeed = rollerSpeed*5/4
+                        roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
+                        speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+                        speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+                        engineTorque = (T_filtered*(5/4) + momentI*systemAccel)/gr #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
+                        
                         for i in range(0,len(speedLabels)): #iterate through all of the speeds and push them to influx
                             if(speedLabels[i] == 'roadSpeed'):
                                 unit = 'mph'
@@ -603,6 +656,16 @@ try:
                             .time(timestamp)
                             )
                             write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+                        point = (
+                            Point("wheelAccel")
+                            .tag("device", device)
+                            .tag("unit", "RPM/s")
+                            .tag("runName", run_name)
+                            .field("value", systemAccel)
+                            .time(timestamp)
+                        )
+                        write_api.write(bucket=BUCKET, org=ORG, record=point)
 
                         point = (
                             Point("power")
