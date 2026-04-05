@@ -313,6 +313,8 @@ class TerminalInterface:
 
     def load_config_file(self):
         try:
+            if self.json_data == None:
+                return
             # Construct InfluxDB point Name
             self.point = (
                 Point("ConfigName")
@@ -325,6 +327,8 @@ class TerminalInterface:
 
             # Construct InfluxDB point Gear Ratio
             self.gear_ratio = self.json_data.get("Gear Ratio")
+            if self.gear_ratio == None:
+                self.gear_ratio = 1
             self.point = (
                 Point("GearRatio")
                 .tag("device", "CMD")
@@ -343,7 +347,9 @@ class TerminalInterface:
             self.button_status = (f"Error parsing packet:", e)
 
     def load_run_plan(self):
-
+        if self.run_config == None:
+            return
+        
         if self.run_mode == "Ramp":
             self.ipc_conn.send("Stop")
         else:
