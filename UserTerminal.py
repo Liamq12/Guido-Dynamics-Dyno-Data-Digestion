@@ -47,7 +47,8 @@ class TerminalInterface:
         self.start_rpm = None
         self.end_rpm = None
         self.ramp_rate = None
-        self.current_valve_pos = 0
+        self.target_rpm = 0
+        self.current_engine_speed = 0
 
         self.gr_calc = 0
 
@@ -157,6 +158,20 @@ class TerminalInterface:
         menu_text = "  ".join(menu_parts)
         return Panel(menu_text, style="green")
     
+    def get_last_speed(self):
+        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -1s) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
+        speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
+        self.gr_calc = 'trying to query speed'
+        if speed_result:
+            for table in speed_result:
+                speed = (table.records.pop())['_value']
+                #self.gr_calc = speed
+                #turbine_speed = speed/self.gear_ratio
+                rollerSpeed = speed
+        else:
+            rollerSpeed = 0
+        return rollerSpeed
+
     def make_valvepos_tab(self):
         """Create input form view"""
         content = []
@@ -220,10 +235,10 @@ class TerminalInterface:
             elif self.run_mode == "Hold":
                 content.append("[bold white]Hold Mode[/bold white]\n")
                 content.append(f"[bold green]Hold RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
-            content.append("[green]Press 'Enter' key to start/stop[/green]")
+            content.append("[green]Press 'Enter' key to start/stop[/green]\n")
 
 
-        content.append(f"[green]Target RPM: {round(self.current_valve_pos)}[/green]")
+        content.append(f"[green]Current RPM: {round(self.current_engine_speed)}[/green]")
         return Panel("\n".join(content), title="Input", style="green")
 
     def make_buttons_tab(self):
@@ -577,7 +592,7 @@ class TerminalInterface:
                     )
             self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=point)
             print(f"Wrote: {metric}={value} {unit}")
-            self.current_valve_pos = value
+            self.target_rpm = value
 
             self.ipc_conn.send("ValvePos")
             time.sleep(0.05)
@@ -728,6 +743,7 @@ class TerminalInterface:
                                     elif self.active_tab == 2: #gear sync tab
                                         self.submitted_value = self.input_value
                                         self.input_value = ""
+                                        '''
                                         query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -10s) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
                                         speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
                                         self.gr_calc = 'trying to query speed'
@@ -737,7 +753,9 @@ class TerminalInterface:
                                                 #self.gr_calc = speed
                                                 #turbine_speed = speed/self.gear_ratio
                                                 rollerSpeed = speed
-                                                self.gr_calc = float(self.submitted_value)/rollerSpeed
+                                                '''
+                                        rollerSpeed = self.get_last_speed()
+                                        self.gr_calc = float(self.submitted_value)/rollerSpeed
 
                                     elif self.active_tab < 0:
                                         self.submitted_value = self.input_value
@@ -853,6 +871,7 @@ class TerminalInterface:
                     self.active_tab = -1 #fake tab for one-time setup of influxdb
                 while self.running:
                     live.update(self.make_layout())
+                    self.current_engine_speed = self.get_last_speed()*self.gear_ratio
         
         except KeyboardInterrupt:
             pass
