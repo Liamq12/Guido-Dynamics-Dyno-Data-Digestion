@@ -91,6 +91,7 @@ run_off_trigger_q = queue.Queue()
 start_rpm_q = queue.Queue()
 running_event = threading.Event()
 run_started = threading.Event()
+zero_torque = threading.Event()
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
@@ -162,6 +163,10 @@ def IPC(conn):
                 message = f"VALVE,POS,{pos}"  
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            elif msg == "ZeroTrq":
+                print("load cell zero triggered")
+                if(udp_connection):
+                    zero_torque.set()
 
 #thread for reading data from influxdb
 def influx_to_stm32():
@@ -563,6 +568,20 @@ try:
                         metric = "dynoLoad" # Real name
                         print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
+                        if zero_torque.is_set(): #logic to set zero on load cell quickly
+                            loadCellB = -(value*loadCellM)
+                            data = {
+                                "load_m": loadCellM,
+                                "load_b": loadCellB,
+                                "moment_of_inertia": momentI
+                            }
+
+                            # Write the data to a JSON file
+                            with open(mechanical_file_path, "w") as json_file:
+                                json.dump(data, json_file, indent=4)
+                            print("load cell successfully zeroed and saved")  
+                            zero_torque.clear() 
+
                         value = value * loadCellM + loadCellB #mx+b equation from torque wrench callibration. These values are in the mechanical config json
                         loadValue = value #save load cell value for power calculation
                     elif metric == "acel":

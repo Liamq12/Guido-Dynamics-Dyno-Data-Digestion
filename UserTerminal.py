@@ -34,7 +34,7 @@ class TerminalInterface:
         self.submitted_value = None
         self.selected_button = 0
         self.selected_entry = 0
-        self.button_labels = ['Setup Valve', 'Load Run Plan', 'Load Configuration File', 'Setup InfluxDB', 'Exit']
+        self.button_labels = ['Setup Valve', 'Load Run Plan', 'Load Configuration File', 'Setup InfluxDB', 'Zero Torque Reading']
         self.entries = ["[green]Enter valve controller pulses per rotation:\n", "[green]Enter planetary gearbox ratio (output/input):\n", "[green]Save Values:\n"]
         self.button_status = ""
         self.json_file_path = None
@@ -705,6 +705,8 @@ class TerminalInterface:
                                             self.button_status = f'Config file loaded successfully'
                                             self.load_config_file()
                                             # self.button_status = f'MASHALLAH3'
+                                        elif (self.button_status == f"Button \'Zero Torque Reading\' pressed!"):
+                                            self.ipc_conn.send("ZeroTrq")
                                         elif (self.button_status == f"Button \'Setup InfluxDB\' pressed!"):
                                             self.active_tab = -1
                                         elif (self.button_status == f"Button \'Setup Valve\' pressed!"):
