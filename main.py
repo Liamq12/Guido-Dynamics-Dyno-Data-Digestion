@@ -167,7 +167,7 @@ def IPC(conn):
             elif msg == "ZeroTrq":
                 print("load cell zero triggered")
                 zero_torque.set()
-            elif msg == "ZeroTrq":
+            elif msg == "ZeroValve":
                 print("valve pos zeroed")
                 zero_valve.set()
 
