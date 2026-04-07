@@ -92,6 +92,7 @@ start_rpm_q = queue.Queue()
 running_event = threading.Event()
 run_started = threading.Event()
 zero_torque = threading.Event()
+zero_valve = threading.Event()
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
@@ -165,8 +166,10 @@ def IPC(conn):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             elif msg == "ZeroTrq":
                 print("load cell zero triggered")
-                if(udp_connection):
-                    zero_torque.set()
+                zero_torque.set()
+            elif msg == "ZeroTrq":
+                print("valve pos zeroed")
+                zero_valve.set()
 
 #thread for reading data from influxdb
 def influx_to_stm32():
@@ -281,13 +284,13 @@ except:
             now = time.time()
             f1 = 1000*math.sin(now*0.1) + 1250
             f2 = 100*math.sin(now)
-            speed = f1 + f2
+            speed = f1 + f2 + random.gauss(1, 1)
             return speed
         def fake_torque_data():
             now = time.time()
             f1 = 30
             f2 = 10*math.sin(now)
-            torque = f1 + f2
+            torque = f1 + f2 + random.gauss(1, 1)
             return torque
         #the loop of the program
         while True:
@@ -591,6 +594,11 @@ try:
                         metric = "RPMTarget"
                     elif metric == "vPos":
                         metric = "valvePos"
+                        if zero_valve.is_set():
+                            if value == 0: #zero the valve position only if it is set to zero (dyno not running)
+                                message = f"VALVE,ZER,1"  
+                                sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                                zero_valve.clear()
                     elif(metric == "rSpd"): #a lot of logic gets done here with the wheel speed metric
                         metric = "wheelSpeed" # Real name
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
