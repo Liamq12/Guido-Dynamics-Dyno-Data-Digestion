@@ -7,6 +7,5 @@
   "Mode": "Ramp",
   "Start": "5000",
   "End": "13000",
-  "Rate": "500",
-  "StopMode": "Hold"
+  "Rate": "500"
 }

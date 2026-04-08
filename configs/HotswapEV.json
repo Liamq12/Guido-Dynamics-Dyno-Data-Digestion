@@ -5,8 +5,7 @@
   "Version": "1.0.0",
 
   "Mode": "Ramp",
-  "Start": "3000",
-  "End": "8000",
-  "Rate": "500",
-  "StopMode": "Hold"
+  "Start": "4000",
+  "End": "6000",
+  "Rate": "200"
 }

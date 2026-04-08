@@ -1,0 +1,7 @@
+{
+    "Mode": "Ramp",
+    "Start": "3000",
+    "End": "6000",
+    "Rate": "500",
+    "HiTorque": "On"
+}

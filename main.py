@@ -96,6 +96,7 @@ running_event = threading.Event()
 run_started = threading.Event()
 zero_torque = threading.Event()
 zero_valve = threading.Event()
+high_torque_run = threading.Event()
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
@@ -135,7 +136,19 @@ def IPC(conn):
                 print("start ramp")
                 message = f"FRAMP,ENA,1"
                 running_event.set()
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                 run_started.set()
+            elif msg == "StartHiTrq":
+                print("starting high torque")
+                print("valve position set to 100%")
+                message = f"ENPID,RPM,0"
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                message = f"VALVE,POS,100" #set valve position fully open for the high torque scenario
+                running_event.set()
+                high_torque_run.set()
+                # run_started.set() #don't start the run yet until rpms have reached a high enough value
                 if(udp_connection):
                     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
             #command to stop the ramp - TODO not implemented in controller yet
@@ -374,6 +387,10 @@ except:
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
             if running_event.is_set():
+                if high_torque_run.is_set() and not run_started.is_set():
+                    if value > trigger_on:
+                        run_started.set()
+                        print("Run started, now we enable PID") 
                 if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
                     if(value > trigger_off and running): #we have exceeded trigger off but still in a run, so let's disable the run
                         running_event.clear()
@@ -426,6 +443,10 @@ except:
                 if running: #the running flag was disabled so we will stop the current run
                     running = False
                     run_name = "None"
+            if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
+                run_started.clear()
+                high_torque_run.clear()
+                print("run reset")
 
             for i in range(0,len(speedLabels)): #iterate through each speed label and post its corresponding value to influx
                 if(speedLabels[i] == 'roadSpeed'):
@@ -686,6 +707,16 @@ try:
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
                             if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
+                                if high_torque_run.is_set() and not run_started.is_set():
+                                    if value > trigger_on:
+                                        run_started.set()
+                                        print("Run started, now we enable PID") 
+                                        message = f"ENPID,RPM,1"
+                                        if(udp_connection):
+                                            sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                                        message = f"FRAMP,ENA,1"
+                                        if(udp_connection):
+                                            sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                 if(value > trigger_off and running): #we have exceeded trigger off but still in a run, so let's disable the run
                                     running_event.clear()
                                     running = False
@@ -741,6 +772,8 @@ try:
                                 run_name = "None"
                         if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
                             run_started.clear()
+                            high_torque_run.clear()
+                            print("run reset")
                             message = f"COPID,RPM,{start_rpm}"
                             if(udp_connection):
                                 sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
