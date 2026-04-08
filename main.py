@@ -47,6 +47,9 @@ try:
         loadCellM = json_data.get("load_m")
         loadCellB = json_data.get("load_b")
         momentI = json_data.get("moment_of_inertia")
+        rollingA = json_data.get("rolling_a")
+        rollingB = json_data.get("rolling_b")
+        rollingC = json_data.get("rolling_c")
 except Exception as e:
     INFLUX_URL = "http://localhost:8086"
     TOKEN = "blank"
@@ -253,6 +256,41 @@ def get_last_pull_num(confName):
                         print(num)
     return last_num
 
+def rolling_resistance(speed):
+    if speed == 0:
+        return 0
+    else:
+        a = rollingA
+        b = rollingB
+        c = rollingC
+        alpha = math.sqrt(b**2 - 4*a*(c-speed))
+        return momentI*alpha
+
+def saturation_pressure(T): #takes temp in C and returns saturation temperature in millibars
+    Psat = 6.1078*math.exp(17.27*T/(T+237.3))
+    return Psat/10
+
+def sae_correction(p,t,h): #take pressure, temp, humidity in base values and produce correction factor
+    p = p/100 #convert to millibars
+    Pa = p - saturation_pressure(t)*(h/100)
+    correctionFactor = (990/Pa) * ((t + 273)/298)**0.5
+    return correctionFactor
+
+def write_zero_torque(b):
+    data = {
+        "load_m": loadCellM,
+        "load_b": b,
+        "moment_of_inertia": momentI,
+        "rolling_a": rollingA,
+        "rolling_b": rollingB,
+        "rolling_c": rollingC
+    }
+
+    # Write the data to a JSON file
+    with open(mechanical_file_path, "w") as json_file:
+        json.dump(data, json_file, indent=4)
+    print("load cell successfully zeroed and saved")  
+
 # ---------- UDP SETUP --------
 # Begin the UDP connection to the DAQ--
 try:
@@ -273,10 +311,16 @@ except:
     try:
         freq = 10
         dt = 1/freq
-        tau = dt / (0.1 + dt)
+        tc = [0, 0.05, 0.1]
+        tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
         a_est = 0
         w_est = 0
-        T_filtered_prev = 0
+        T_filtered_prev = [0, 0, 0]
+        T_filtered = [0, 0, 0]
+        torqueCorrected = [0, 0, 0]
+        T_double_filtered_prev = [0, 0, 0]
+        T_double_filtered = [0, 0, 0]
+        engineTorque = [0, 0, 0]
         alpha = 0.4
         beta = 0.1
         #creates functions to generate fake torque and speed data for debug
@@ -320,16 +364,12 @@ except:
             rollerSpeed = w_est
             systemAccel = a_est
 
-            T_filtered = tau * loadValue + (1 - tau) * T_filtered_prev
-            T_filtered_prev = T_filtered
-
             engineSpeed = rollerSpeed*gr
             turbineSpeed = rollerSpeed*5/4
             roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
             speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
             speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
-            engineTorque = (T_filtered*(5/4) + momentI*systemAccel)/gr #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
-            
+
             #run name for batching purposes
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
@@ -400,8 +440,64 @@ except:
                     .field("value", float(speedValues[i]))
                     )
                 write_api.write(bucket=BUCKET, org=ORG, record=point)
-
+            
+            for i in range(0, 3):              
+                T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]
+                T_filtered_prev[i] = T_filtered[i]
                 
+                torqueCorrected[i] = (T_filtered[i]*(5/4) + momentI*systemAccel) #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
+                T_double_filtered[i] = tau[i] * torqueCorrected[i] + (1 - tau[i]) * T_double_filtered_prev[i]
+                
+                T_double_filtered_prev[i] = T_double_filtered[i]
+                engineTorque[i] = (T_double_filtered[i] + rolling_resistance(rollerSpeed))/gr
+
+                correctionFactor = 1.25
+                
+                point = (
+                    Point("engineTorque")
+                    .tag("device", device)
+                    .tag("unit", "lbf-ft")
+                    .tag("runName", run_name)
+                    .tag("smoothing", i)
+                    .tag("SAE", "Off")
+                    .field("value", float(engineTorque[i]))
+                )
+                write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
+
+                point = (
+                    Point("enginePower")
+                    .tag("device", device)
+                    .tag("unit", "HP")
+                    .tag("runName", run_name)
+                    .tag("smoothing", i)
+                    .tag("SAE", "Off")
+                    .field("value", float(engineTorque[i]*engineSpeed/5252))
+                )
+                write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+                point = (
+                    Point("engineTorque")
+                    .tag("device", device)
+                    .tag("unit", "lbf-ft")
+                    .tag("runName", run_name)
+                    .tag("smoothing", i)
+                    .tag("SAE", "On")
+                    .field("value", float(engineTorque[i]*correctionFactor))
+                )
+                write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
+
+                point = (
+                    Point("enginePower")
+                    .tag("device", device)
+                    .tag("unit", "HP")
+                    .tag("runName", run_name)
+                    .tag("smoothing", i)
+                    .tag("SAE", "On")
+                    .field("value", float(engineTorque[i]*correctionFactor*engineSpeed/5252))
+                )
+                write_api.write(bucket=BUCKET, org=ORG, record=point)
+                
+
             point = (
                 Point("wheelAccel")
                 .tag("device", device)
@@ -421,15 +517,6 @@ except:
             write_api.write(bucket=BUCKET, org=ORG, record=point) #post power value to influx
 
             point = (
-                Point("engineTorque")
-                .tag("device", device)
-                .tag("unit", "lbf-ft")
-                .tag("runName", run_name)
-                .field("value", float(engineTorque))
-            )
-            write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
-
-            point = (
                 Point("dynoLoad")
                 .tag("device", device)
                 .tag("unit", "ft-lbf")
@@ -438,14 +525,7 @@ except:
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-            point = (
-                    Point("enginePower")
-                    .tag("device", device)
-                    .tag("unit", "HP")
-                    .tag("runName", run_name)
-                    .field("value", float(engineTorque*engineSpeed/5252))
-                )
-            write_api.write(bucket=BUCKET, org=ORG, record=point)
+            
 
     except KeyboardInterrupt:
         print("cancelled")
@@ -472,7 +552,12 @@ try:
     
     a_est = 0
     w_est = 0
-    T_filtered_prev = 0
+    T_filtered_prev = [0, 0, 0]
+    T_filtered = [0, 0, 0]
+    torqueCorrected = [0, 0, 0]
+    T_double_filtered_prev = [0, 0, 0]
+    T_double_filtered = [0, 0, 0]
+    engineTorque = [0, 0, 0]
     alpha = 0.4
     beta = 0.1
     while True:
@@ -545,8 +630,12 @@ try:
                 .time(timestamp)
                 )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
+
             dt = 1/freq
-            tau = dt / (0.1 + dt)
+            tc = [0, 0.05, 0.1]
+            tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
+            
+            correctionFactor = sae_correction(pressure, temp, humidity)
 
             print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
 
@@ -573,16 +662,7 @@ try:
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         if zero_torque.is_set(): #logic to set zero on load cell quickly
                             loadCellB = -(value*loadCellM)
-                            data = {
-                                "load_m": loadCellM,
-                                "load_b": loadCellB,
-                                "moment_of_inertia": momentI
-                            }
-
-                            # Write the data to a JSON file
-                            with open(mechanical_file_path, "w") as json_file:
-                                json.dump(data, json_file, indent=4)
-                            print("load cell successfully zeroed and saved")  
+                            write_zero_torque(loadCellB)
                             zero_torque.clear() 
 
                         value = value * loadCellM + loadCellB #mx+b equation from torque wrench callibration. These values are in the mechanical config json
@@ -601,6 +681,8 @@ try:
                                 zero_valve.clear()
                     elif(metric == "rSpd"): #a lot of logic gets done here with the wheel speed metric
                         metric = "wheelSpeed" # Real name
+                        if value <= 200:
+                            value = 0
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
                             if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
@@ -675,16 +757,71 @@ try:
                         rollerSpeed = w_est
                         systemAccel = a_est
 
-                        T_filtered = tau * loadValue + (1 - tau) * T_filtered_prev
-                        T_filtered_prev = T_filtered
 
                         engineSpeed = rollerSpeed*gr
                         turbineSpeed = rollerSpeed*5/4
                         roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
                         speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
                         speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
-                        engineTorque = (T_filtered*(5/4) + momentI*systemAccel)/gr #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
-                        
+
+                        for i in range(0, 3):              
+                            T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]
+                            T_filtered_prev[i] = T_filtered[i]
+                            
+                            torqueCorrected[i] = (T_filtered[i]*(5/4) + momentI*systemAccel) #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
+                            T_double_filtered[i] = tau[i] * torqueCorrected[i] + (1 - tau[i]) * T_double_filtered_prev[i]
+                            
+                            T_double_filtered_prev[i] = T_double_filtered[i]
+                            engineTorque[i] = (T_double_filtered[i] + rolling_resistance(rollerSpeed))/gr
+
+                            point = (
+                                Point("engineTorque")
+                                .tag("device", device)
+                                .tag("unit", "lbf-ft")
+                                .tag("runName", run_name)
+                                .tag("smoothing", i)
+                                .tag("SAE", "Off")
+                                .field("value", float(engineTorque[i]))
+                                .time(timestamp)
+                            )
+                            write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
+
+                            point = (
+                                Point("enginePower")
+                                .tag("device", device)
+                                .tag("unit", "HP")
+                                .tag("runName", run_name)
+                                .tag("smoothing", i)
+                                .tag("SAE", "Off")
+                                .field("value", float(engineTorque[i]*engineSpeed/5252))
+                                .time(timestamp)
+                            )
+                            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+                            point = (
+                                Point("engineTorque")
+                                .tag("device", device)
+                                .tag("unit", "lbf-ft")
+                                .tag("runName", run_name)
+                                .tag("smoothing", i)
+                                .tag("SAE", "On")
+                                .field("value", float(engineTorque[i]*correctionFactor))
+                                .time(timestamp)
+                            )
+                            write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
+
+                            point = (
+                                Point("enginePower")
+                                .tag("device", device)
+                                .tag("unit", "HP")
+                                .tag("runName", run_name)
+                                .tag("smoothing", i)
+                                .tag("SAE", "On")
+                                .field("value", float(engineTorque[i]*correctionFactor*engineSpeed/5252))
+                                .time(timestamp)
+                            )
+                            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
                         for i in range(0,len(speedLabels)): #iterate through all of the speeds and push them to influx
                             if(speedLabels[i] == 'roadSpeed'):
                                 unit = 'mph'
@@ -720,25 +857,25 @@ try:
                         )
                         write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-                        point = (
-                            Point("enginePower")
-                            .tag("device", device)
-                            .tag("unit", "HP")
-                            .tag("runName", run_name)
-                            .field("value", float(engineTorque*engineSpeed/5252))
-                            .time(timestamp)
-                        )
-                        write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        # point = (
+                        #     Point("enginePower")
+                        #     .tag("device", device)
+                        #     .tag("unit", "HP")
+                        #     .tag("runName", run_name)
+                        #     .field("value", float(engineTorque*engineSpeed/5252))
+                        #     .time(timestamp)
+                        # )
+                        # write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-                        point = (
-                            Point("engineTorque")
-                            .tag("device", device)
-                            .tag("unit", "lbf-ft")
-                            .tag("runName", run_name)
-                            .field("value", float(engineTorque))
-                            .time(timestamp)
-                        )
-                        write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        # point = (
+                        #     Point("engineTorque")
+                        #     .tag("device", device)
+                        #     .tag("unit", "lbf-ft")
+                        #     .tag("runName", run_name)
+                        #     .field("value", float(engineTorque))
+                        #     .time(timestamp)
+                        # )
+                        # write_api.write(bucket=BUCKET, org=ORG, record=point)
                     try: #for all data we receive we post it to influx
                         point = (
                             Point(metric)
