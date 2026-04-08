@@ -12,10 +12,7 @@ echo "Starting Services..."
 sudo systemctl stop grafana-server 2>/dev/null || true
 
 # --- Make sure user has required Python packages ---
-python3 -m pip install influxdb-client
-python3 -m pip install rich
-python3 -m pip install tk
-python3 -m pip install pytz
+# DO THIS FROM REQUIREMENTS.txt
 
 # --- Start InfluxDB in a new terminal ---
 echo "Starting InfluxDB..."
