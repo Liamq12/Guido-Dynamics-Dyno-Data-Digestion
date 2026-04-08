@@ -681,6 +681,8 @@ try:
                                 zero_valve.clear()
                     elif(metric == "rSpd"): #a lot of logic gets done here with the wheel speed metric
                         metric = "wheelSpeed" # Real name
+                        if value <= 200:
+                            value = 0
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
                             if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
@@ -780,6 +782,7 @@ try:
                                 .tag("smoothing", i)
                                 .tag("SAE", "Off")
                                 .field("value", float(engineTorque[i]))
+                                .time(timestamp)
                             )
                             write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
 
@@ -791,6 +794,7 @@ try:
                                 .tag("smoothing", i)
                                 .tag("SAE", "Off")
                                 .field("value", float(engineTorque[i]*engineSpeed/5252))
+                                .time(timestamp)
                             )
                             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
@@ -802,6 +806,7 @@ try:
                                 .tag("smoothing", i)
                                 .tag("SAE", "On")
                                 .field("value", float(engineTorque[i]*correctionFactor))
+                                .time(timestamp)
                             )
                             write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
 
@@ -813,6 +818,7 @@ try:
                                 .tag("smoothing", i)
                                 .tag("SAE", "On")
                                 .field("value", float(engineTorque[i]*correctionFactor*engineSpeed/5252))
+                                .time(timestamp)
                             )
                             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
@@ -851,25 +857,25 @@ try:
                         )
                         write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-                        point = (
-                            Point("enginePower")
-                            .tag("device", device)
-                            .tag("unit", "HP")
-                            .tag("runName", run_name)
-                            .field("value", float(engineTorque*engineSpeed/5252))
-                            .time(timestamp)
-                        )
-                        write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        # point = (
+                        #     Point("enginePower")
+                        #     .tag("device", device)
+                        #     .tag("unit", "HP")
+                        #     .tag("runName", run_name)
+                        #     .field("value", float(engineTorque*engineSpeed/5252))
+                        #     .time(timestamp)
+                        # )
+                        # write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-                        point = (
-                            Point("engineTorque")
-                            .tag("device", device)
-                            .tag("unit", "lbf-ft")
-                            .tag("runName", run_name)
-                            .field("value", float(engineTorque))
-                            .time(timestamp)
-                        )
-                        write_api.write(bucket=BUCKET, org=ORG, record=point)
+                        # point = (
+                        #     Point("engineTorque")
+                        #     .tag("device", device)
+                        #     .tag("unit", "lbf-ft")
+                        #     .tag("runName", run_name)
+                        #     .field("value", float(engineTorque))
+                        #     .time(timestamp)
+                        # )
+                        # write_api.write(bucket=BUCKET, org=ORG, record=point)
                     try: #for all data we receive we post it to influx
                         point = (
                             Point(metric)
