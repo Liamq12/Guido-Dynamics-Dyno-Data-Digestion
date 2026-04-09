@@ -49,6 +49,7 @@ class TerminalInterface:
         self.ramp_rate = None
         self.target_rpm = 0
         self.current_engine_speed = 0
+        self.hitorque = False
         
         self.remote_mode = 1 # Should make this changable from the invocation
 
@@ -273,7 +274,10 @@ class TerminalInterface:
             else:
                 content.append("[black on green]Running[/black on green]\n")
             if self.run_mode == "Ramp":
-                content.append("[bold white]Ramp Mode[/bold white]\n")
+                if self.hitorque == True:
+                    content.append("[bold white]Ramp Mode[/bold white] [black on red]High Torque[/black on red]\n")
+                else:
+                    content.append("[bold white]Ramp Mode[/bold white]\n")
                 content.append(f"[bold green]Start RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
                 content.append(f"[bold green]End RPM:[/bold green] [bold white]{self.end_rpm}[/bold white]\n")
                 content.append(f"[bold green]RPM Rate (RPM/s):[/bold green] [bold white]{self.ramp_rate}[/bold white]\n")
@@ -413,10 +417,16 @@ class TerminalInterface:
             self.ipc_conn.send(self.end_rpm/self.gear_ratio)
             self.ipc_conn.send("Rate")
             self.ipc_conn.send(self.ramp_rate/self.gear_ratio)
+            if self.run_config.get("HiTorque") != None and self.run_config.get("HiTorque") == "On":
+                self.hitorque = True
+            else:
+                self.hitorque = False
+
         elif self.run_mode == "Hold":
             self.start_rpm = int(self.run_config.get("RPM"))
             self.ipc_conn.send("Start RPM")
             self.ipc_conn.send(self.start_rpm/self.gear_ratio)
+            self.hitorque = False
 
     def make_influx_config_token(self):
         """Create input form view"""
@@ -659,19 +669,19 @@ class TerminalInterface:
         except Exception as e:
             print(f"Error writing {metric}: {e}")
 
-    def target_rpm_ramp(self, start, end, rate, loop = False):
-        valve_pos = start
-        prev_time = time.time()
-        while (valve_pos < end and not self.stop_event.is_set()):
-            ct = time.time()
-            dt = ct - prev_time
-            valve_pos = valve_pos + rate*dt
-            if(valve_pos > end):
-                valve_pos = end
-            self.send_target_rpm(valve_pos)
-            prev_time = ct
-            time.sleep(0.1)
-        self.is_ramping = False
+    # def target_rpm_ramp(self, start, end, rate, loop = False):
+    #     valve_pos = start
+    #     prev_time = time.time()
+    #     while (valve_pos < end and not self.stop_event.is_set()):
+    #         ct = time.time()
+    #         dt = ct - prev_time
+    #         valve_pos = valve_pos + rate*dt
+    #         if(valve_pos > end):
+    #             valve_pos = end
+    #         self.send_target_rpm(valve_pos)
+    #         prev_time = ct
+    #         time.sleep(0.1)
+    #     self.is_ramping = False
         
     def run(self):
         """Main loop with Live display"""
@@ -785,14 +795,17 @@ class TerminalInterface:
                                                 self.stop_event.set()
                                                 self.is_ramping = False
                                             else:
-                                                self.ipc_conn.send("Start")
+                                                if self.hitorque == False:
+                                                    self.ipc_conn.send("Start")
+                                                else:
+                                                    self.ipc_conn.send("StartHiTrq")
                                                 self.is_ramping = True
-                                                start_rpm = self.start_rpm
-                                                end_rpm = self.end_rpm
-                                                ramp_rate = self.ramp_rate
+                                                # start_rpm = self.start_rpm
+                                                # end_rpm = self.end_rpm
+                                                # ramp_rate = self.ramp_rate
                                                 self.stop_event.clear()
-                                                self.ramp_t = threading.Thread(target=self.target_rpm_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
-                                                self.ramp_t.start()
+                                                # self.ramp_t = threading.Thread(target=self.target_rpm_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
+                                                # self.ramp_t.start()
                                         else:
                                             if(self.is_ramping):
                                                 self.ipc_conn.send("Stop Hold RPM")
