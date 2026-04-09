@@ -49,6 +49,7 @@ class TerminalInterface:
         self.ramp_rate = None
         self.target_rpm = 0
         self.current_engine_speed = 0
+        self.hitorque = False
         
         self.remote_mode = 1 # Should make this changable from the invocation
 
