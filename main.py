@@ -389,6 +389,8 @@ except Exception as e:
                 gr = gr_queue.get()
             if not config_queue.empty():
                 config_name = config_queue.get()
+                date = datetime.today().strftime('%m-%d')
+                config_name = f'{config_name}_({date})'
                 run_num = get_last_pull_num(config_name)
             if not run_on_trigger_q.empty():
                 trigger_on = run_on_trigger_q.get()
@@ -622,6 +624,8 @@ try:
                 start_rpm = start_rpm_q.get()
             if not config_queue.empty():
                 config_name = config_queue.get()
+                date = datetime.today().strftime('%m-%d')
+                config_name = f'{config_name}_({date})'
                 run_num = get_last_pull_num(config_name)
             if not run_on_trigger_q.empty():
                 trigger_on = run_on_trigger_q.get()
