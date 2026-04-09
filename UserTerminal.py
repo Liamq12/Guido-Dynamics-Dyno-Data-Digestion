@@ -413,8 +413,10 @@ class TerminalInterface:
             self.ramp_rate = float(self.run_config.get("Rate"))
             self.ipc_conn.send("Start RPM")
             self.ipc_conn.send(self.start_rpm/self.gear_ratio)
+            time.sleep(0.1)
             self.ipc_conn.send("End RPM")
             self.ipc_conn.send(self.end_rpm/self.gear_ratio)
+            time.sleep(0.1)
             self.ipc_conn.send("Rate")
             self.ipc_conn.send(self.ramp_rate/self.gear_ratio)
             if self.run_config.get("HiTorque") != None and self.run_config.get("HiTorque") == "On":
@@ -940,6 +942,8 @@ class TerminalInterface:
                     live.update(self.make_layout())
                     try:
                         self.current_engine_speed = self.get_last_speed()*self.gear_ratio
+                        if self.is_ramping and self.current_engine_speed > self.end_rpm:
+                            self.is_ramping = False
                     except Exception as e:
                         print({e} + "RAAAAAAAAAAAA")
         
