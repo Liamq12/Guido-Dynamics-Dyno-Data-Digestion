@@ -31,8 +31,9 @@ loadcellTF = 0.002  # Volts per lbf
 
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
-influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
-mechanical_file_path = os.path.join(os.getcwd(), "configs\\System\\dyno_mechanical.json")
+BASE_DIR = Path(__file__).parent
+influx_file_path = BASE_DIR / "configs" / "System" / "influxdb.json"
+mechanical_file_path = BASE_DIR / "configs" / "System" / "dyno_mechanical.json"
 try:
     #open the influxdb.json file for token, bucket, org
     with open(influx_file_path, 'r', encoding='utf-8') as f:
