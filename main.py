@@ -168,6 +168,7 @@ def IPC(conn):
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     message = f"VALVE,POS,100" #set valve position fully open for the high torque scenario
+                    time.sleep(0.1)
                     running_event.set()
                     high_torque_run.set()
                     # run_started.set() #don't start the run yet until rpms have reached a high enough value

@@ -609,7 +609,7 @@ class TerminalInterface:
             json.dump(data, json_file, indent=4)    
 
         #read data from JSON and start influxdb
-            if(remote_mode == 0):
+            if(self.remote_mode == 0):
                 with open(self.influx_file_path, 'r', encoding='utf-8') as f:
                     self.json_data = json.load(f)
                     self.INFLUX_URL = "http://localhost:8086"
