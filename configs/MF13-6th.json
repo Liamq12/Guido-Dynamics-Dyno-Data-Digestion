@@ -1,0 +1,12 @@
+{
+  "Name": "MF13_6th",
+  "Gear Ratio": 4.304,
+  "ID": "c1b6e18sssss8",
+  "Version": "1.0.0",
+
+  "Mode": "Ramp",
+  "Start": "4000",
+  "End": "13000",
+  "Rate": "900",
+  "StopMode": "Hold"
+}
