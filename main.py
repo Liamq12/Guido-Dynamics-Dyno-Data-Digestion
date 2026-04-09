@@ -7,7 +7,6 @@ import queue
 import multiprocessing.connection
 import math
 import pytz
-from pathlib import Path
 from datetime import timedelta, timezone, datetime
 
 #IP address and port for receiving from DAQ
@@ -19,16 +18,11 @@ UDP_IP_SEND = "192.168.0.123"
 UDP_PORT_SEND = 8
 sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-remoteMode = 1
-
 #setup inter-process communication to user terminal
-if(remoteMode == 1):
-    ipc_address = ('fsaelinux', 31205)
-else:
-    ipc_address = ('localhost', 31205)
+ipc_address = ('localhost', 31205)
 ipc_listener = Listener(ipc_address, authkey=b'key')
 ipc_conn = ipc_listener.accept()
-# var for debug if the computer is not connected to the DAQ
+#var for debug if the computer is not connected to the DAQ
 udp_connection = False
 
 # Load cell constants, hardcoded
@@ -37,13 +31,9 @@ loadcellTF = 0.002  # Volts per lbf
 
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
-
 BASE_DIR = Path(__file__).parent
 influx_file_path = BASE_DIR / "configs" / "System" / "influxdb.json"
 mechanical_file_path = BASE_DIR / "configs" / "System" / "dyno_mechanical.json"
-
-#influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
-#mechanical_file_path = os.path.join(os.getcwd(), "configs\\System\\dyno_mechanical.json")
 try:
     #open the influxdb.json file for token, bucket, org
     with open(influx_file_path, 'r', encoding='utf-8') as f:
@@ -52,7 +42,6 @@ try:
         TOKEN = json_data.get("Token")
         ORG = json_data.get("Org")
         BUCKET = json_data.get("Bucket")
-        print(TOKEN)
     #open the dyno_mechanical.json file for moment of inertia and load cell equation values, y=mx+b
     with open(mechanical_file_path, 'r', encoding='utf-8') as f:
         json_data = json.load(f)
@@ -63,7 +52,6 @@ try:
         rollingB = json_data.get("rolling_b")
         rollingC = json_data.get("rolling_c")
 except Exception as e:
-    print("could not read influx creds")
     INFLUX_URL = "http://localhost:8086"
     TOKEN = "blank"
     ORG = "blank"
@@ -97,7 +85,6 @@ query_api = client.query_api()
 gr = 1
 gr_queue = queue.Queue()
 config_queue = queue.Queue()
-
 #config name and run number are used for putting data in batches
 config_name = None
 run_num = 0
@@ -110,118 +97,83 @@ running_event = threading.Event()
 run_started = threading.Event()
 zero_torque = threading.Event()
 zero_valve = threading.Event()
-high_torque_run = threading.Event()
-
-def ipc_server():
-    ipc_address = ('0.0.0.0', 31205)
-    ipc_listener = Listener(ipc_address, authkey=b'key')
-    print("IPC server waiting for connection...")
-    while True:
-        try:
-            conn = ipc_listener.accept()  # blocks until a client connects
-            print("IPC client connected")
-            IPC(conn)  # runs until client disconnects
-        except Exception as e:
-            print(f"IPC connection lost: {e}")
-            print("Waiting for new IPC connection...")
-            continue  # loop back and wait for next connection
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
         trigger_on = 0
         while True:
-            try:
-                msg = conn.recv()
-                #when start RPM is set, we automatically target this value until the user starts the ramp
-                if msg == "Start RPM":
-                    rpm = conn.recv()
-                    print(f"Start RPM set to: {rpm}")
-                    message = f"COPID,RPM,{rpm}"
-                    trigger_on = rpm*0.9
-                    run_on_trigger_q.put(trigger_on)
-                    start_rpm_q.put(rpm)
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                    message = f"ENPID,RPM,1"
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #end RPM setting for ramp
-                elif msg == "End RPM":
-                    rpm = conn.recv()
-                    print(f"End RPM set to: {rpm}")
-                    message = f"FRAMP,RPM,{rpm}"
-                    run_off_trigger_q.put(rpm)
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #ramp rate
-                elif msg == "Rate":
-                    rate = conn.recv()
-                    print(f"RPM Rate set to: {rate}")
-                    message = f"FRAMP,RTE,{rate}"
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #command to start the ramp
-                elif msg == "Start":
-                    print("start ramp")
-                    message = f"FRAMP,ENA,1"
-                    running_event.set()
-                    run_started.set()
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                elif msg == "StartHiTrq":
-                    print("starting high torque")
-                    print("valve position set to 100%")
-                    message = f"ENPID,RPM,0"
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                    message = f"VALVE,POS,100" #set valve position fully open for the high torque scenario
-                    running_event.set()
-                    high_torque_run.set()
-                    # run_started.set() #don't start the run yet until rpms have reached a high enough value
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #command to stop the ramp - TODO not implemented in controller yet
-                elif msg == "Stop":
-                    print("stop ramp")
-                    message = f"ERAMP,RPM,0"
-                    running_event.clear()
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #hold RMP is began. TODO this doesn't do anything other than tell the program to batch run data. The rpm is already being held immediately after it is set
-                elif msg == "Start Hold RPM":
-                    print("Holding RPM value")
-                    message = f"ENPID,RPM,1"
-                    run_off_trigger_q.put(trigger_on*0.8)
-                    running_event.set()
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #hold RMP is stopped. TODO determine if this is the functionality that we actually want
-                elif msg == "Stop Hold RPM":
-                    print("Stop RPM hold")
-                    message = f"ENPID,RPM,0"
-                    running_event.clear()
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                #manually set valve position. TODO we may want to get rid of this functionality, or hide it in a debug window
-                elif msg == "ValvePos":
-                    pos = conn.recv()
-                    print(f"Setting valve pos: {pos}")
-                    message = f"VALVE,POS,{pos}"  
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                elif msg == "ZeroTrq":
-                    print("load cell zero triggered")
-                    zero_torque.set()
-                elif msg == "ZeroValve":
-                    print("valve pos zeroed")
-                    zero_valve.set()
-            except EOFError:
-                print("IPC client disconnected")
-                return
-            except Exception as e:
-                print(f"IPC error: {e}")
-                return
-
+            msg = conn.recv()
+            #when start RPM is set, we automatically target this value until the user starts the ramp
+            if msg == "Start RPM":
+                rpm = conn.recv()
+                print(f"Start RPM set to: {rpm}")
+                message = f"COPID,RPM,{rpm}"
+                trigger_on = rpm*0.9
+                run_on_trigger_q.put(trigger_on)
+                start_rpm_q.put(rpm)
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                message = f"ENPID,RPM,1"
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #end RPM setting for ramp
+            elif msg == "End RPM":
+                rpm = conn.recv()
+                print(f"End RPM set to: {rpm}")
+                message = f"FRAMP,RPM,{rpm}"
+                run_off_trigger_q.put(rpm)
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #ramp rate
+            elif msg == "Rate":
+                rate = conn.recv()
+                print(f"RPM Rate set to: {rate}")
+                message = f"FRAMP,RTE,{rate}"
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #command to start the ramp
+            elif msg == "Start":
+                print("start ramp")
+                message = f"FRAMP,ENA,1"
+                running_event.set()
+                run_started.set()
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #command to stop the ramp - TODO not implemented in controller yet
+            elif msg == "Stop":
+                print("stop ramp")
+                message = f"ERAMP,RPM,0"
+                running_event.clear()
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #hold RMP is began. TODO this doesn't do anything other than tell the program to batch run data. The rpm is already being held immediately after it is set
+            elif msg == "Start Hold RPM":
+                print("Holding RPM value")
+                message = f"ENPID,RPM,1"
+                run_off_trigger_q.put(trigger_on*0.8)
+                running_event.set()
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #hold RMP is stopped. TODO determine if this is the functionality that we actually want
+            elif msg == "Stop Hold RPM":
+                print("Stop RPM hold")
+                message = f"ENPID,RPM,0"
+                running_event.clear()
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            #manually set valve position. TODO we may want to get rid of this functionality, or hide it in a debug window
+            elif msg == "ValvePos":
+                pos = conn.recv()
+                print(f"Setting valve pos: {pos}")
+                message = f"VALVE,POS,{pos}"  
+                if(udp_connection):
+                    sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+            elif msg == "ZeroTrq":
+                print("load cell zero triggered")
+                zero_torque.set()
+            elif msg == "ZeroValve":
+                print("valve pos zeroed")
+                zero_valve.set()
 
 #thread for reading data from influxdb
 def influx_to_stm32():
@@ -343,22 +295,20 @@ def write_zero_torque(b):
 # ---------- UDP SETUP --------
 # Begin the UDP connection to the DAQ--
 try:
-    IPC_t = threading.Thread(target=ipc_server, daemon=True)
-    IPC_t.start()   
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(5.0)
     print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
     #enable sending/receiving data
     udp_connection = True
-except Exception as e:
+except:
     #duplicate of the real while loop, below, that runs the bulk of the program. This is just for debug purposes and is likely out of date. 
     # TODO make a function so this is more readable and comparable to the real loop
     running = False
     trigger_on = 0
     trigger_off = 0
     udp_connection = False
-    print(f"no connection, just chilling: {e}")
+    print("no connection, just chilling")
     try:
         freq = 10
         dt = 1/freq
@@ -425,10 +375,6 @@ except Exception as e:
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
             if running_event.is_set():
-                if high_torque_run.is_set() and not run_started.is_set():
-                    if value > trigger_on:
-                        run_started.set()
-                        print("Run started, now we enable PID") 
                 if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
                     if(value > trigger_off and running): #we have exceeded trigger off but still in a run, so let's disable the run
                         running_event.clear()
@@ -481,10 +427,6 @@ except Exception as e:
                 if running: #the running flag was disabled so we will stop the current run
                     running = False
                     run_name = "None"
-            if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
-                run_started.clear()
-                high_torque_run.clear()
-                print("run reset")
 
             for i in range(0,len(speedLabels)): #iterate through each speed label and post its corresponding value to influx
                 if(speedLabels[i] == 'roadSpeed'):
@@ -744,16 +686,6 @@ try:
                             value = 0
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
-                            if high_torque_run.is_set() and not run_started.is_set():
-                                if value > trigger_on:
-                                    run_started.set()
-                                    print("Run started, now we enable PID") 
-                                    message = f"ENPID,RPM,1"
-                                    if(udp_connection):
-                                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                                    message = f"FRAMP,ENA,1"
-                                    if(udp_connection):
-                                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                             if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
                                 if(value > trigger_off and running): #we have exceeded trigger off but still in a run, so let's disable the run
                                     running_event.clear()
@@ -810,8 +742,6 @@ try:
                                 run_name = "None"
                         if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
                             run_started.clear()
-                            high_torque_run.clear()
-                            print("run reset")
                             message = f"COPID,RPM,{start_rpm}"
                             if(udp_connection):
                                 sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
@@ -979,7 +909,6 @@ finally:
     write_api.flush()
     write_api.close()
     client.close()
-    if 'sock' in dir():
-        sock.close()
-    # ipc_listener.close()
+    sock.close()
+    ipc_listener.close()
     print("Cleanup complete")

@@ -49,27 +49,46 @@ class TerminalInterface:
         self.ramp_rate = None
         self.target_rpm = 0
         self.current_engine_speed = 0
-        self.hitorque = False
+        
+        self.remote_mode = 1 # Should make this changable from the invocation
 
         self.gr_calc = 0
 
         self.is_ramping = False
         self.stop_event = threading.Event()
 
+        self.TOKEN = "this should never happen"
+        self.ORG = "no"
+        self.BUCKET = "test"
+        self.query_api = None
+
         #load in the influx db file for user token and such
         self.influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
+        self.influx_remote_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb-remote.json")
         self.system_config_file_path = os.path.join(os.getcwd(), "configs\\System\\valve_config.json")
         try:
-            with open(self.influx_file_path, 'r', encoding='utf-8') as f:
-                self.json_data = json.load(f)
-                self.INFLUX_URL = "http://localhost:8086"
-                self.TOKEN = self.json_data.get("Token")
-                self.ORG = self.json_data.get("Org")
-                self.BUCKET = self.json_data.get("Bucket")
-                self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
-                self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
-                self.query_api = self.client.query_api()
-                self.influx_json_read = True
+            if(self.remote_mode == 0):
+                with open(self.influx_file_path, 'r', encoding='utf-8') as f:
+                    self.json_data = json.load(f)
+                    self.INFLUX_URL = "http://localhost:8086"
+                    self.TOKEN = self.json_data.get("Token")
+                    self.ORG = self.json_data.get("Org")
+                    self.BUCKET = self.json_data.get("Bucket")
+                    self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+                    self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                    self.query_api = self.client.query_api()
+                    self.influx_json_read = True
+            else:
+                with open(self.influx_remote_file_path, 'r', encoding='utf-8') as f:
+                    self.json_data = json.load(f)
+                    self.INFLUX_URL = "http://fsaelinux:8086"
+                    self.TOKEN = self.json_data.get("Token")
+                    self.ORG = self.json_data.get("Org")
+                    self.BUCKET = self.json_data.get("Bucket")
+                    self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+                    self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                    self.query_api = self.client.query_api()
+                    self.influx_json_read = True
         except Exception as e:
             self.influx_json_read = False
 
@@ -159,16 +178,44 @@ class TerminalInterface:
         menu_text = "  ".join(menu_parts)
         return Panel(menu_text, style="green")
     
+    def reconnect_influx(self):
+        try:
+            self.client.close()
+        except:
+            pass
+        try:
+            self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG, timeout=3_000)
+            self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+            self.query_api = self.client.query_api()
+        except Exception as e:
+            print(f"Reconnect failed: {e}")
+
     def get_last_speed(self):
-        query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -500ms) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
-        speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
-        if speed_result:
-            for table in speed_result:
-                speed = (table.records.pop())['_value']
-                rollerSpeed = speed
-        else:
-            rollerSpeed = 0
-        return rollerSpeed
+        try:
+            query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -500ms) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
+            speed_result = self.query_api.query(query=query_speed, org=self.ORG)
+            if speed_result:
+                for table in speed_result:
+                    return table.records[-1]['_value']
+            return 0
+        except Exception as e:
+            print(f"Query failed, reconnecting: {e}")
+            self.reconnect_influx()  # reset the client for next call
+            return 0
+
+    # def get_last_speed(self):
+    #     try:
+    #         query_speed = f'from(bucket: "{self.BUCKET}") |> range(start: -500ms) |> filter(fn: (r) => r._measurement == "rollerSpeed")'
+    #         speed_result = self.query_api.query(query=query_speed, org=self.ORG)  
+    #         if speed_result:
+    #             for table in speed_result:
+    #                 speed = (table.records.pop())['_value']
+    #                 return speed
+    #         else:
+    #             return 0
+    #     except Exception as e:
+    #         print(f"{e} RAAAAAAAAAAAA shits fucked")
+    #         return -1  # <-- this is the critical part
 
     def make_valvepos_tab(self):
         """Create input form view"""
@@ -226,10 +273,7 @@ class TerminalInterface:
             else:
                 content.append("[black on green]Running[/black on green]\n")
             if self.run_mode == "Ramp":
-                if self.hitorque == True:
-                    content.append("[bold white]Ramp Mode[/bold white] [black on red]High Torque[/black on red]\n")
-                else:
-                    content.append("[bold white]Ramp Mode[/bold white]\n")
+                content.append("[bold white]Ramp Mode[/bold white]\n")
                 content.append(f"[bold green]Start RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
                 content.append(f"[bold green]End RPM:[/bold green] [bold white]{self.end_rpm}[/bold white]\n")
                 content.append(f"[bold green]RPM Rate (RPM/s):[/bold green] [bold white]{self.ramp_rate}[/bold white]\n")
@@ -369,16 +413,10 @@ class TerminalInterface:
             self.ipc_conn.send(self.end_rpm/self.gear_ratio)
             self.ipc_conn.send("Rate")
             self.ipc_conn.send(self.ramp_rate/self.gear_ratio)
-            if self.run_config.get("HiTorque") != None and self.run_config.get("HiTorque") == "On":
-                self.hitorque = True
-            else:
-                self.hitorque = False
-
         elif self.run_mode == "Hold":
             self.start_rpm = int(self.run_config.get("RPM"))
             self.ipc_conn.send("Start RPM")
             self.ipc_conn.send(self.start_rpm/self.gear_ratio)
-            self.hitorque = False
 
     def make_influx_config_token(self):
         """Create input form view"""
@@ -561,15 +599,26 @@ class TerminalInterface:
             json.dump(data, json_file, indent=4)    
 
         #read data from JSON and start influxdb
-        with open(self.influx_file_path, 'r', encoding='utf-8') as f:
-                self.json_data = json.load(f)
-                self.INFLUX_URL = "http://localhost:8086"
-                self.TOKEN = self.json_data.get("Token")
-                self.ORG = self.json_data.get("Org")
-                self.BUCKET = self.json_data.get("Bucket")
-                self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
-                self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
-                self.influx_json_read = True
+            if(remote_mode == 0):
+                with open(self.influx_file_path, 'r', encoding='utf-8') as f:
+                    self.json_data = json.load(f)
+                    self.INFLUX_URL = "http://localhost:8086"
+                    self.TOKEN = self.json_data.get("Token")
+                    self.ORG = self.json_data.get("Org")
+                    self.BUCKET = self.json_data.get("Bucket")
+                    self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+                    self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                    self.influx_json_read = True
+            else:
+                with open(self.influx_remote_file_path, 'r', encoding='utf-8') as f:
+                    self.json_data = json.load(f)
+                    self.INFLUX_URL = "http://fsaelinux:8086"
+                    self.TOKEN = self.json_data.get("Token")
+                    self.ORG = self.json_data.get("Org")
+                    self.BUCKET = self.json_data.get("Bucket")
+                    self.client = InfluxDBClient(url=self.INFLUX_URL, token=self.TOKEN, org=self.ORG)
+                    self.write_api = self.client.write_api(write_options=WriteOptions(batch_size=1))
+                    self.influx_json_read = True
 
     def send_target_rpm(self, rpm):
         try:
@@ -610,19 +659,19 @@ class TerminalInterface:
         except Exception as e:
             print(f"Error writing {metric}: {e}")
 
-    # def target_rpm_ramp(self, start, end, rate, loop = False):
-    #     valve_pos = start
-    #     prev_time = time.time()
-    #     while (valve_pos < end and not self.stop_event.is_set()):
-    #         ct = time.time()
-    #         dt = ct - prev_time
-    #         valve_pos = valve_pos + rate*dt
-    #         if(valve_pos > end):
-    #             valve_pos = end
-    #         self.send_target_rpm(valve_pos)
-    #         prev_time = ct
-    #         time.sleep(0.1)
-    #     self.is_ramping = False
+    def target_rpm_ramp(self, start, end, rate, loop = False):
+        valve_pos = start
+        prev_time = time.time()
+        while (valve_pos < end and not self.stop_event.is_set()):
+            ct = time.time()
+            dt = ct - prev_time
+            valve_pos = valve_pos + rate*dt
+            if(valve_pos > end):
+                valve_pos = end
+            self.send_target_rpm(valve_pos)
+            prev_time = ct
+            time.sleep(0.1)
+        self.is_ramping = False
         
     def run(self):
         """Main loop with Live display"""
@@ -631,7 +680,7 @@ class TerminalInterface:
         print("\nStarting in 2 seconds...")
         time.sleep(2)
         #setup IPC to main python program
-        self.ipc_address = ('localhost', 31205)
+        self.ipc_address = ('fsaelinux', 31205)
         try:
             self.ipc_conn = Client(self.ipc_address, authkey=b'key')
         except Exception as e:
@@ -736,17 +785,14 @@ class TerminalInterface:
                                                 self.stop_event.set()
                                                 self.is_ramping = False
                                             else:
-                                                if self.hitorque == False:
-                                                    self.ipc_conn.send("Start")
-                                                else:
-                                                    self.ipc_conn.send("StartHiTrq")
+                                                self.ipc_conn.send("Start")
                                                 self.is_ramping = True
-                                                # start_rpm = self.start_rpm
-                                                # end_rpm = self.end_rpm
-                                                # ramp_rate = self.ramp_rate
+                                                start_rpm = self.start_rpm
+                                                end_rpm = self.end_rpm
+                                                ramp_rate = self.ramp_rate
                                                 self.stop_event.clear()
-                                                # self.ramp_t = threading.Thread(target=self.target_rpm_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
-                                                # self.ramp_t.start()
+                                                self.ramp_t = threading.Thread(target=self.target_rpm_ramp, args=(start_rpm, end_rpm, ramp_rate, False), daemon=True)
+                                                self.ramp_t.start()
                                         else:
                                             if(self.is_ramping):
                                                 self.ipc_conn.send("Stop Hold RPM")
@@ -876,7 +922,10 @@ class TerminalInterface:
                     self.active_tab = -1 #fake tab for one-time setup of influxdb
                 while self.running:
                     live.update(self.make_layout())
-                    self.current_engine_speed = self.get_last_speed()*self.gear_ratio
+                    try:
+                        self.current_engine_speed = self.get_last_speed()*self.gear_ratio
+                    except Exception as e:
+                        print({e} + "RAAAAAAAAAAAA")
         
         except KeyboardInterrupt:
             pass
