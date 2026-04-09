@@ -8,9 +8,6 @@ cd "$SCRIPT_DIR"
 echo "Welcome to Team Guido Dynamics!"
 echo "Starting Services..."
  
-# Stop Grafana if running
-sudo systemctl stop grafana-server 2>/dev/null || true
- 
 # --- Set up virtual environment ---
 VENV_DIR="$SCRIPT_DIR/venv"
  
@@ -25,15 +22,6 @@ source "$VENV_DIR/bin/activate"
 # --- Install required Python packages ---
 echo "Installing dependencies..."
 pip install -r "$SCRIPT_DIR/requirements.txt"
- 
-# --- Start InfluxDB in a new terminal ---
-echo "Starting InfluxDB..."
-"$SCRIPT_DIR/influxdb2-2.7.12-linux/influxd" &
-INFLUX_PID=$!
- 
-# --- Copy Grafana config and start Grafana ---
-sudo cp "$SCRIPT_DIR/grafana.ini" /etc/grafana/grafana.ini
-sudo systemctl start grafana-server
  
 # --- Start Python UDP ingest script ---
 echo "Starting UDP Ingest..."
@@ -59,11 +47,4 @@ read -n 1 -s
 echo "Stopping Python script..."
 kill "$PYTHON_PID" 2>/dev/null || true
  
-echo "Stopping Grafana..."
-sudo systemctl stop grafana-server 2>/dev/null || true
- 
-echo "Stopping InfluxDB..."
-kill "$INFLUX_PID" 2>/dev/null || true
- 
 echo "Cleanup complete."
- 
