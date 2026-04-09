@@ -621,7 +621,7 @@ class TerminalInterface:
         print("\nStarting in 2 seconds...")
         time.sleep(2)
         #setup IPC to main python program
-        self.ipc_address = ('localhost', 31205)
+        self.ipc_address = ('fsaelinux', 31205)
         try:
             self.ipc_conn = Client(self.ipc_address, authkey=b'key')
         except Exception as e:
