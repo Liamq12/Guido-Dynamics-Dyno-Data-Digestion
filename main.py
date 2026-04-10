@@ -731,7 +731,7 @@ try:
                     # Load cell conversion
                     if metric == "dyLd":
                         metric = "dynoLoad" # Real name
-                        # print(f"Raw val is: {value}")
+                        print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         if zero_torque.is_set(): #logic to set zero on load cell quickly
                             loadCellB = -(value*loadCellM)
