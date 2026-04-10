@@ -107,6 +107,8 @@ zero_valve = threading.Event()
 ring_bell = threading.Event()
 high_torque_run = threading.Event()
 
+high_torque_accum = 1
+
 def ipc_server():
     ipc_address = ('0.0.0.0', 31205)
     ipc_listener = Listener(ipc_address, authkey=b'key')
@@ -169,10 +171,6 @@ def IPC(conn):
                 elif msg == "StartHiTrq":
                     print("starting high torque")
                     print("valve position set to 100%")
-                    message = f"COPID,ACU,1"
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                    time.sleep(0.05)
                     message = f"ENPID,RPM,0"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
@@ -765,6 +763,11 @@ try:
                                     message = f"ENPID,RPM,1"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                                    time.sleep(0.05)
+                                    message = f"COPID,ACU,{high_torque_accum}"
+                                    if(udp_connection):
+                                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                                    time.sleep(0.05)
                                     message = f"FRAMP,ENA,1"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
