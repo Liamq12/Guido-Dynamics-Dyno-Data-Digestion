@@ -702,7 +702,7 @@ try:
             
             correctionFactor = sae_correction(pressure, temp, humidity)
 
-            print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
+            # print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
 
             for cycle in range(cycles): #iterate through each numbered data packet and post its data at the correct time
                 rows = data_packet.get(f"data{cycle}", []) 
