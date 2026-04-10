@@ -158,6 +158,10 @@ def IPC(conn):
                 #command to start the ramp
                 elif msg == "Start":
                     print("start ramp")
+                    message = f"COPID,ACU,0"
+                    if(udp_connection):
+                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    time.sleep(0.05)
                     message = f"FRAMP,ENA,1"
                     running_event.set()
                     if(udp_connection):
@@ -165,6 +169,10 @@ def IPC(conn):
                 elif msg == "StartHiTrq":
                     print("starting high torque")
                     print("valve position set to 100%")
+                    message = f"COPID,ACU,1"
+                    if(udp_connection):
+                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    time.sleep(0.05)
                     message = f"ENPID,RPM,0"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
