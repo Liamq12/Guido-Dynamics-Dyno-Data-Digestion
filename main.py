@@ -104,6 +104,7 @@ running_event = threading.Event()
 run_started = threading.Event()
 zero_torque = threading.Event()
 zero_valve = threading.Event()
+ring_bell = threading.Event()
 high_torque_run = threading.Event()
 
 def ipc_server():
@@ -209,6 +210,13 @@ def IPC(conn):
                 elif msg == "ZeroValve":
                     print("valve pos zeroed")
                     zero_valve.set()
+                elif msg == "RingBell":
+                    print("ring bell")
+                    ring_bell.set()
+                    message = f"BELLR,RNG,3"  
+                    if(udp_connection):
+                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    ring_bell.clear()
             except EOFError:
                 print("IPC client disconnected")
                 return
