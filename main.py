@@ -104,6 +104,7 @@ running_event = threading.Event()
 run_started = threading.Event()
 zero_torque = threading.Event()
 zero_valve = threading.Event()
+ring_bell = threading.Event()
 high_torque_run = threading.Event()
 
 def ipc_server():
@@ -209,6 +210,13 @@ def IPC(conn):
                 elif msg == "ZeroValve":
                     print("valve pos zeroed")
                     zero_valve.set()
+                elif msg == "RingBell":
+                    print("ring bell")
+                    ring_bell.set()
+                    message = f"BELLR,RNG,3"  
+                    if(udp_connection):
+                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    ring_bell.clear()
             except EOFError:
                 print("IPC client disconnected")
                 return
@@ -389,6 +397,8 @@ except Exception as e:
                 gr = gr_queue.get()
             if not config_queue.empty():
                 config_name = config_queue.get()
+                date = datetime.today().strftime('%m-%d')
+                config_name = f'{config_name}_({date})'
                 run_num = get_last_pull_num(config_name)
             if not run_on_trigger_q.empty():
                 trigger_on = run_on_trigger_q.get()
@@ -622,6 +632,8 @@ try:
                 start_rpm = start_rpm_q.get()
             if not config_queue.empty():
                 config_name = config_queue.get()
+                date = datetime.today().strftime('%m-%d')
+                config_name = f'{config_name}_({date})'
                 run_num = get_last_pull_num(config_name)
             if not run_on_trigger_q.empty():
                 trigger_on = run_on_trigger_q.get()
@@ -632,7 +644,7 @@ try:
             data, addr = sock.recvfrom(16384)
             raw = data.decode("utf-8").strip()
             raw = raw.replace("inf", "-1")
-            print(f"Received from {addr}: {raw}")
+            # print(f"Received from {addr}: {raw}")
 
             try:
                 parsed = json.loads(raw)
@@ -690,7 +702,7 @@ try:
             
             correctionFactor = sae_correction(pressure, temp, humidity)
 
-            print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
+            # print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
 
             for cycle in range(cycles): #iterate through each numbered data packet and post its data at the correct time
                 rows = data_packet.get(f"data{cycle}", []) 
@@ -711,7 +723,7 @@ try:
                     # Load cell conversion
                     if metric == "dyLd":
                         metric = "dynoLoad" # Real name
-                        print(f"Raw val is: {value}")
+                        # print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         if zero_torque.is_set(): #logic to set zero on load cell quickly
                             loadCellB = -(value*loadCellM)

@@ -34,7 +34,7 @@ class TerminalInterface:
         self.submitted_value = None
         self.selected_button = 0
         self.selected_entry = 0
-        self.button_labels = ['Load Run Plan', 'Load Configuration File', 'Zero Torque Reading', 'Zero Valve Position', 'Setup Valve', 'Setup InfluxDB']
+        self.button_labels = ['Load Run Plan', 'Load Configuration File', 'Zero Torque Reading', 'Zero Valve Position', 'Setup Valve', 'Setup InfluxDB', 'Ring Bell']
         self.entries = ["[green]Enter valve controller pulses per rotation:\n", "[green]Enter planetary gearbox ratio (output/input):\n", "[green]Save Values:\n"]
         self.button_status = ""
         self.json_file_path = None
@@ -787,6 +787,8 @@ class TerminalInterface:
                                             self.active_tab = -4
                                         elif (self.button_status == f"Button \'Zero Valve Position\' pressed!"):
                                             self.ipc_conn.send("ZeroValve")
+                                        elif (self.button_status == f"Button \'Ring Bell\' pressed!"):
+                                            self.ipc_conn.send("RingBell")
                                         if(self.button_status == f"Button \'Load Run Plan\' pressed!"):
                                             self.button_status = f'Loading Config'
                                             self.open_file_dialog()
