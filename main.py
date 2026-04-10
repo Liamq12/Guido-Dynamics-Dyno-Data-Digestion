@@ -644,7 +644,7 @@ try:
             data, addr = sock.recvfrom(16384)
             raw = data.decode("utf-8").strip()
             raw = raw.replace("inf", "-1")
-            print(f"Received from {addr}: {raw}")
+            # print(f"Received from {addr}: {raw}")
 
             try:
                 parsed = json.loads(raw)
@@ -723,7 +723,7 @@ try:
                     # Load cell conversion
                     if metric == "dyLd":
                         metric = "dynoLoad" # Real name
-                        print(f"Raw val is: {value}")
+                        # print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
                         if zero_torque.is_set(): #logic to set zero on load cell quickly
                             loadCellB = -(value*loadCellM)
