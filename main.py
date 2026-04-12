@@ -30,7 +30,7 @@ udp_connection = False
 
 # Load cell constants, hardcoded
 loadcellZero = 1.660
-loadcellTF = 0.002  # Volts per lbf
+loadcellTF = 0.00290249433107  # Volts per lbf
 
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
@@ -73,6 +73,7 @@ client = InfluxDBClient(url=INFLUX_URL, token=TOKEN, org=ORG)
 engineTorque = 0
 loadValue = 0
 systemAccel = 0
+rawLoadVoltage = 0
 
 # For 10Hz: small batch, fast flush
 write_api = client.write_api(write_options=WriteOptions(
@@ -596,6 +597,16 @@ except Exception as e:
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
+            point = (
+                Point("loadRawVoltage")
+                .tag("device", device)
+                .tag("unit", "ft-lbf")
+                .tag("runName", run_name)
+                .field("value", float(loadRawVoltage)) #post raw loadcell voltage to influx
+            )
+            write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+
             
 
     except KeyboardInterrupt:
@@ -733,6 +744,7 @@ try:
                         metric = "dynoLoad" # Real name
                         # print(f"Raw val is: {value}")
                         value = (value - loadcellZero) / loadcellTF #hardcoded load cell values
+                        rawLoadVoltage = value
                         if zero_torque.is_set(): #logic to set zero on load cell quickly
                             loadCellB = -(value*loadCellM)
                             write_zero_torque(loadCellB)
