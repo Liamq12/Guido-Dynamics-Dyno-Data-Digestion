@@ -598,11 +598,11 @@ except Exception as e:
             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
             point = (
-                Point("loadRawVoltage")
+                Point("rawLoadVoltage")
                 .tag("device", device)
                 .tag("unit", "ft-lbf")
                 .tag("runName", run_name)
-                .field("value", float(loadRawVoltage)) #post raw loadcell voltage to influx
+                .field("value", float(rawLoadVoltage)) #post raw loadcell voltage to influx
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
