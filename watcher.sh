@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-
 SCRIPT="main.py"
-LAUNCHER="runMeLinux.sh"           # ← the second script that launches your python correctly
+LAUNCHER="runMeLinux.sh"
 BRANCH="FSAEServer"
 INTERVAL=30
 
@@ -19,12 +18,29 @@ stop_app() {
     fi
 }
 
+cleanup() {
+    echo ""
+    echo "Ctrl+C detected. Shutting down..."
+    stop_app
+    echo "Killing ssh-agent..."
+    sudo pkill -f "main.py"
+    echo "Done."
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/Liam
+
 git fetch origin "$BRANCH" --quiet
 LAST_HASH=$(git rev-parse "origin/$BRANCH")
 start_app
 
 while true; do
-    sleep "$INTERVAL"
+    sleep "$INTERVAL" &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID"
 
     git fetch origin "$BRANCH" --quiet
     NEW_HASH=$(git rev-parse "origin/$BRANCH")
@@ -32,6 +48,7 @@ while true; do
     if [ "$NEW_HASH" != "$LAST_HASH" ]; then
         echo "Change detected ($LAST_HASH → $NEW_HASH)"
         stop_app
+        git stash
         git pull origin "$BRANCH" --quiet
         LAST_HASH="$NEW_HASH"
         start_app
