@@ -30,7 +30,7 @@ udp_connection = False
 
 # Load cell constants, hardcoded
 loadcellZero = 1.660
-loadcellTF = 0.00290249433107  # Volts per lbf
+loadcellTF = 0.002 # 0.00290249433107  # Volts per lbf
 
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
