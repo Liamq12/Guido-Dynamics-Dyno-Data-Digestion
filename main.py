@@ -806,7 +806,7 @@ try:
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
                             if smooth_start_run.is_set() and not run_started.is_set():
-                                if value > trigger_on and systemAccel <= desired_rate:
+                                if value > trigger_on and (systemAccel*0.75) <= desired_rate:
                                     message = f"COPID,RPM,{value}"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
