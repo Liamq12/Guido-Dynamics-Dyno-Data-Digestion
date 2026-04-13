@@ -331,7 +331,7 @@ def get_last_pull_num(confName):
     return last_num
 
 def rolling_resistance(speed):
-    if speed == 0:
+    if speed < 200:
         return 0
     else:
         a = rollingA
