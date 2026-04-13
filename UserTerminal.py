@@ -947,7 +947,7 @@ class TerminalInterface:
                         if self.is_ramping and self.current_engine_speed > self.end_rpm:
                             self.is_ramping = False
                     except Exception as e:
-                        print({e} + "RAAAAAAAAAAAA")
+                        print({e})
         
         except KeyboardInterrupt:
             pass
