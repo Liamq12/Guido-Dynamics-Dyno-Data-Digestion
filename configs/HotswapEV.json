@@ -7,6 +7,6 @@
   "Mode": "Ramp",
   "Start": "1500",
   "End": "6000",
-  "Rate": "500",
+  "Rate": "1000",
   "HiTorque": "On"
 }
