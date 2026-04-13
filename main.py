@@ -181,7 +181,7 @@ def IPC(conn):
                          vpos = conn.recv()
                     else:
                          vpos = 100
-                    start_accum_q.put() = vpos*accum_ratio
+                    start_accum_q.put(vpos*accum_ratio)
                     message = f"ENPID,RPM,0"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
