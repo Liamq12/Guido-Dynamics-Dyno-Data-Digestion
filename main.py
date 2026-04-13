@@ -108,9 +108,11 @@ run_started = threading.Event()
 zero_torque = threading.Event()
 zero_valve = threading.Event()
 ring_bell = threading.Event()
-high_torque_run = threading.Event()
+start_accum_q = queue.Queue()
+smooth_start_run = threading.Event()
 
-high_torque_accum = 1
+accum_ratio = 0.0
+start_accum = 1
 
 def ipc_server():
     ipc_address = ('0.0.0.0', 31205)
@@ -134,6 +136,7 @@ def IPC(conn):
                 msg = conn.recv()
                 #when start RPM is set, we automatically target this value until the user starts the ramp
                 if msg == "Start RPM":
+                    print("start RPM")
                     rpm = conn.recv()
                     print(f"Start RPM set to: {rpm}")
                     message = f"COPID,RPM,{rpm}"
@@ -171,19 +174,25 @@ def IPC(conn):
                     running_event.set()
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                elif msg == "StartHiTrq":
-                    print("starting high torque")
-                    print("valve position set to 100%")
+                elif msg == "StartHiTrq" or msg == "SmoothStart":
+                    print("starting high torque/smooth start")
+                    vpos = 0
+                    if msg == "SmoothStart":
+                         vpos = conn.recv()
+                    else:
+                         vpos = 100
+                    start_accum_q.put() = vpos*accum_ratio
                     message = f"ENPID,RPM,0"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                    message = f"VALVE,POS,100" #set valve position fully open for the high torque scenario
+                    message = f"VALVE,POS,{vpos}" #set valve position fully open for the high torque scenario
                     time.sleep(0.1)
                     running_event.set()
-                    high_torque_run.set()
+                    smooth_start_run.set()
                     # run_started.set() #don't start the run yet until rpms have reached a high enough value
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    print(f"valve position set to {vpos}%")
                 #command to stop the ramp - TODO not implemented in controller yet
                 elif msg == "Stop":
                     print("stop ramp")
@@ -226,6 +235,8 @@ def IPC(conn):
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     ring_bell.clear()
+                else:
+                    print(msg)
             except EOFError:
                 print("IPC client disconnected")
                 return
@@ -438,7 +449,7 @@ except Exception as e:
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
             if running_event.is_set():
-                if high_torque_run.is_set() and not run_started.is_set():
+                if smooth_start_run.is_set() and not run_started.is_set():
                     if value > trigger_on:
                         run_started.set()
                         print("Run started, now we enable PID")
@@ -496,7 +507,7 @@ except Exception as e:
                     run_name = "None"
             if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
                 run_started.clear()
-                high_torque_run.clear()
+                smooth_start_run.clear()
                 print("run reset")
 
             for i in range(0,len(speedLabels)): #iterate through each speed label and post its corresponding value to influx
@@ -612,6 +623,7 @@ except Exception as e:
     except KeyboardInterrupt:
         print("cancelled")
     except Exception as e:
+        print("Excepted here")
         print(e)
 
 #---This is the main loop that runs, takes data from the UDP connection and posts it to influx -----#
@@ -658,6 +670,8 @@ try:
                 trigger_on = run_on_trigger_q.get()
             if not run_off_trigger_q.empty():
                 trigger_off = run_off_trigger_q.get()
+            if not start_accum_q.empty():
+                start_accum = start_accum_q.get()
 
             #take in data from ethernet connection
             data, addr = sock.recvfrom(16384)
@@ -770,7 +784,7 @@ try:
                             value = 0
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
-                            if high_torque_run.is_set() and not run_started.is_set():
+                            if smooth_start_run.is_set() and not run_started.is_set():
                                 if value > trigger_on:
                                     run_started.set()
                                     print("Run started, now we enable PID") 
@@ -778,7 +792,7 @@ try:
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                     time.sleep(0.05)
-                                    message = f"COPID,ACU,{high_torque_accum}"
+                                    message = f"COPID,ACU,{start_accum}"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                     time.sleep(0.05)
@@ -841,7 +855,7 @@ try:
                                 run_name = "None"
                         if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
                             run_started.clear()
-                            high_torque_run.clear()
+                            smooth_start_run.clear()
                             print("run reset")
                             message = f"COPID,RPM,{start_rpm}"
                             if(udp_connection):
