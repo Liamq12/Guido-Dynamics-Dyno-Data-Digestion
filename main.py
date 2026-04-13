@@ -163,9 +163,9 @@ def IPC(conn):
                 #command to start the ramp
                 elif msg == "Start":
                     print("start ramp")
-                    message = f"COPID,ACU,0"
-                    if(udp_connection):
-                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    # message = f"COPID,ACU,0"
+                    # if(udp_connection):
+                    #     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     time.sleep(0.05)
                     message = f"FRAMP,ENA,1"
                     running_event.set()
@@ -775,10 +775,10 @@ try:
                                     message = f"ENPID,RPM,1"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                                    time.sleep(0.05)
-                                    message = f"COPID,ACU,{start_accum}"
-                                    if(udp_connection):
-                                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                                    # time.sleep(0.05)
+                                    # message = f"COPID,ACU,{start_accum}"
+                                    # if(udp_connection):
+                                    #     sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                     time.sleep(0.05)
                                     message = f"FRAMP,ENA,1"
                                     if(udp_connection):
