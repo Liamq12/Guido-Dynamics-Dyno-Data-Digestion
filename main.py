@@ -776,6 +776,7 @@ try:
                         #systemAccel = value*gr #TODO check units for this
                     elif metric == "RPMT":
                         metric = "RPMTarget"
+                        value = value * gr
                     elif metric == "vPos":
                         metric = "valvePos"
                         if zero_valve.is_set():
