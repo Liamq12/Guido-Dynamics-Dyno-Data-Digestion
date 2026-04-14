@@ -108,9 +108,13 @@ run_started = threading.Event()
 zero_torque = threading.Event()
 zero_valve = threading.Event()
 ring_bell = threading.Event()
-high_torque_run = threading.Event()
+start_accum_q = queue.Queue()
+desired_rate_q = queue.Queue()
+smooth_start_run = threading.Event()
 
-high_torque_accum = 1
+accum_ratio = 0.0
+start_accum = 1
+desired_rate = 0
 
 def ipc_server():
     ipc_address = ('0.0.0.0', 31205)
@@ -134,6 +138,7 @@ def IPC(conn):
                 msg = conn.recv()
                 #when start RPM is set, we automatically target this value until the user starts the ramp
                 if msg == "Start RPM":
+                    print("start RPM")
                     rpm = conn.recv()
                     print(f"Start RPM set to: {rpm}")
                     message = f"COPID,RPM,{rpm}"
@@ -157,6 +162,7 @@ def IPC(conn):
                 elif msg == "Rate":
                     rate = conn.recv()
                     print(f"RPM Rate set to: {rate}")
+                    desired_rate_q.put(rate)
                     message = f"FRAMP,RTE,{rate}"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
@@ -171,19 +177,25 @@ def IPC(conn):
                     running_event.set()
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                elif msg == "StartHiTrq":
-                    print("starting high torque")
-                    print("valve position set to 100%")
+                elif msg == "StartHiTrq" or msg == "SmoothStart":
+                    print("starting high torque/smooth start")
+                    vpos = 0
+                    if msg == "SmoothStart":
+                         vpos = conn.recv()
+                    else:
+                         vpos = 100
+                    start_accum_q.put(vpos*accum_ratio)
                     message = f"ENPID,RPM,0"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                    message = f"VALVE,POS,100" #set valve position fully open for the high torque scenario
+                    message = f"VALVE,POS,{vpos}" #set valve position fully open for the high torque scenario
                     time.sleep(0.1)
                     running_event.set()
-                    high_torque_run.set()
+                    smooth_start_run.set()
                     # run_started.set() #don't start the run yet until rpms have reached a high enough value
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    print(f"valve position set to {vpos}%")
                 #command to stop the ramp - TODO not implemented in controller yet
                 elif msg == "Stop":
                     print("stop ramp")
@@ -226,6 +238,8 @@ def IPC(conn):
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     ring_bell.clear()
+                else:
+                    print(msg)
             except EOFError:
                 print("IPC client disconnected")
                 return
@@ -317,7 +331,7 @@ def get_last_pull_num(confName):
     return last_num
 
 def rolling_resistance(speed):
-    if speed == 0:
+    if speed < 200:
         return 0
     else:
         a = rollingA
@@ -438,7 +452,7 @@ except Exception as e:
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
             if running_event.is_set():
-                if high_torque_run.is_set() and not run_started.is_set():
+                if smooth_start_run.is_set() and not run_started.is_set():
                     if value > trigger_on:
                         run_started.set()
                         print("Run started, now we enable PID")
@@ -496,7 +510,7 @@ except Exception as e:
                     run_name = "None"
             if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
                 run_started.clear()
-                high_torque_run.clear()
+                smooth_start_run.clear()
                 print("run reset")
 
             for i in range(0,len(speedLabels)): #iterate through each speed label and post its corresponding value to influx
@@ -612,6 +626,7 @@ except Exception as e:
     except KeyboardInterrupt:
         print("cancelled")
     except Exception as e:
+        print("Excepted here")
         print(e)
 
 #---This is the main loop that runs, takes data from the UDP connection and posts it to influx -----#
@@ -658,6 +673,10 @@ try:
                 trigger_on = run_on_trigger_q.get()
             if not run_off_trigger_q.empty():
                 trigger_off = run_off_trigger_q.get()
+            if not start_accum_q.empty():
+                start_accum = start_accum_q.get()
+            if not desired_rate_q.empty():
+                desired_rate = desired_rate_q.get()
 
             #take in data from ethernet connection
             data, addr = sock.recvfrom(16384)
@@ -769,17 +788,37 @@ try:
                         metric = "wheelSpeed" # Real name
                         if value <= 200:
                             value = 0
+                        #calculate all the rotational speeds. Assign each speed a label and value
+                        rawSpeed = value
+                        w_measured = rawSpeed
+                        innovation = w_measured - w_est - a_est * dt
+                        w_est = w_est + a_est * dt + alpha * innovation
+                        a_est = a_est + beta * innovation / dt
+                        rollerSpeed = w_est
+                        systemAccel = a_est
+
+
+                        engineSpeed = rollerSpeed*gr
+                        turbineSpeed = rollerSpeed*5/4
+                        roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
+                        speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+                        speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+
                         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
                         if running_event.is_set():
-                            if high_torque_run.is_set() and not run_started.is_set():
-                                if value > trigger_on:
+                            if smooth_start_run.is_set() and not run_started.is_set():
+                                if value > trigger_on and (systemAccel*0.75) <= desired_rate:
+                                    message = f"COPID,RPM,{value}"
+                                    if(udp_connection):
+                                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                     run_started.set()
+                                    time.sleep(0.05)
                                     print("Run started, now we enable PID") 
                                     message = f"ENPID,RPM,1"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                     time.sleep(0.05)
-                                    message = f"COPID,ACU,{high_torque_accum}"
+                                    message = f"COPID,ACU,{start_accum}"
                                     if(udp_connection):
                                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                                     time.sleep(0.05)
@@ -842,7 +881,7 @@ try:
                                 run_name = "None"
                         if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
                             run_started.clear()
-                            high_torque_run.clear()
+                            smooth_start_run.clear()
                             print("run reset")
                             message = f"COPID,RPM,{start_rpm}"
                             if(udp_connection):
@@ -850,22 +889,6 @@ try:
                             message = f"ENPID,RPM,1"
                             if(udp_connection):
                                 sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-                            
-                        #calculate all the rotational speeds. Assign each speed a label and value
-                        rawSpeed = value
-                        w_measured = rawSpeed
-                        innovation = w_measured - w_est - a_est * dt
-                        w_est = w_est + a_est * dt + alpha * innovation
-                        a_est = a_est + beta * innovation / dt
-                        rollerSpeed = w_est
-                        systemAccel = a_est
-
-
-                        engineSpeed = rollerSpeed*gr
-                        turbineSpeed = rollerSpeed*5/4
-                        roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
-                        speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
-                        speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
 
                         for i in range(0, 3):              
                             T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]

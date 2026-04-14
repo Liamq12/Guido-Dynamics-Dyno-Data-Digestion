@@ -1,0 +1,8 @@
+{
+    "Mode": "Ramp",
+    "Start": "5000",
+    "End": "8000",
+    "Rate": "400",
+    "SmoothStart": "On",
+    "InitialLoad": 13
+}

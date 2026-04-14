@@ -50,6 +50,7 @@ class TerminalInterface:
         self.target_rpm = 0
         self.current_engine_speed = 0
         self.hitorque = False
+        self.smoothStart = False
         
         self.remote_mode = 1 # Should make this changable from the invocation
 
@@ -276,6 +277,8 @@ class TerminalInterface:
             if self.run_mode == "Ramp":
                 if self.hitorque == True:
                     content.append("[bold white]Ramp Mode[/bold white] [black on red]High Torque[/black on red]\n")
+                elif self.smoothStart == True:
+                    content.append(f"[bold white]Ramp Mode[/bold white] [black on green]Smooth Start - {self.startLoad}%[/black on green]\n")
                 else:
                     content.append("[bold white]Ramp Mode[/bold white]\n")
                 content.append(f"[bold green]Start RPM:[/bold green] [bold white]{self.start_rpm}[/bold white] \n")
@@ -386,16 +389,18 @@ class TerminalInterface:
             )
 
             self.write_api.write(bucket=self.BUCKET, org=self.ORG, record=self.point)
-
             if(self.json_data.get("Mode") != None):
-                self.load_run_plan()
-            
+                try:
+                    self.load_run_plan()
+                except Exception as e:
+                    self.button_status = e
+
 
         except Exception as e:
             print("Error parsing packet:", e)
             self.button_status = (f"Error parsing packet:", e)
 
-    def load_run_plan(self):        
+    def load_run_plan(self):       
         if self.run_mode == "Ramp":
             self.ipc_conn.send("Stop")
         else:
@@ -419,10 +424,20 @@ class TerminalInterface:
             time.sleep(0.1)
             self.ipc_conn.send("Rate")
             self.ipc_conn.send(self.ramp_rate/self.gear_ratio)
+
             if self.run_config.get("HiTorque") != None and self.run_config.get("HiTorque") == "On":
                 self.hitorque = True
+            elif self.run_config.get("SmoothStart") != None and self.run_config.get("SmoothStart") == "On":
+                self.hitorque = False
+                self.smoothStart = True
+                if self.run_config.get("InitialLoad") != None:
+                    self.startLoad = float(self.run_config.get("InitialLoad"))
+                else:
+                    self.startLoad = 50
             else:
                 self.hitorque = False
+                self.smoothStart = False
+                self.startLoad = 0
 
         elif self.run_mode == "Hold":
             self.start_rpm = int(self.run_config.get("RPM"))
@@ -802,10 +817,15 @@ class TerminalInterface:
                                                 self.stop_event.set()
                                                 self.is_ramping = False
                                             else:
-                                                if self.hitorque == False:
-                                                    self.ipc_conn.send("Start")
-                                                else:
+                                                if self.hitorque == True:
                                                     self.ipc_conn.send("StartHiTrq")
+                                                elif self.smoothStart == True:
+                                                    self.ipc_conn.send("SmoothStart")
+                                                    time.sleep(0.05)
+                                                    self.ipc_conn.send(self.startLoad*0.9)
+                                                else:
+                                                    self.ipc_conn.send("Start")
+                                                    
                                                 self.is_ramping = True
                                                 # start_rpm = self.start_rpm
                                                 # end_rpm = self.end_rpm
