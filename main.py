@@ -331,7 +331,7 @@ def get_last_pull_num(confName):
     return last_num
 
 def rolling_resistance(speed):
-    if speed < 400:
+    if speed < 200:
         return 0
     else:
         a = rollingA
@@ -351,22 +351,19 @@ def sae_correction(p,t,h): #take pressure, temp, humidity in base values and pro
     return correctionFactor
 
 def write_zero_torque(b):
-    try:
-        data = {
-            "load_m": loadCellM,
-            "load_b": b,
-            "moment_of_inertia": momentI,
-            "rolling_a": rollingA,
-            "rolling_b": rollingB,
-            "rolling_c": rollingC
-        }
+    data = {
+        "load_m": loadCellM,
+        "load_b": b,
+        "moment_of_inertia": momentI,
+        "rolling_a": rollingA,
+        "rolling_b": rollingB,
+        "rolling_c": rollingC
+    }
 
-        # Write the data to a JSON file
-        with open(mechanical_file_path, "w") as json_file:
-            json.dump(data, json_file, indent=4)
-        print("load cell successfully zeroed and saved")  
-    except Exception as e:
-        print(e)
+    # Write the data to a JSON file
+    with open(mechanical_file_path, "w") as json_file:
+        json.dump(data, json_file, indent=4)
+    print("load cell successfully zeroed and saved")  
 
 # ---------- UDP SETUP --------
 # Begin the UDP connection to the DAQ--
@@ -451,10 +448,6 @@ except Exception as e:
             speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
             speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
 
-            if zero_torque.is_set(): #logic to set zero on load cell quickly
-                loadCellB = -(loadValue*loadCellM)
-                write_zero_torque(loadCellB)
-                zero_torque.clear() 
             #run name for batching purposes
             run_name = "None"
             #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
@@ -775,6 +768,7 @@ try:
                             loadCellB = -(value*loadCellM)
                             write_zero_torque(loadCellB)
                             zero_torque.clear() 
+
                         value = value * loadCellM + loadCellB #mx+b equation from torque wrench callibration. These values are in the mechanical config json
                         loadValue = value #save load cell value for power calculation
                     elif metric == "acel":
@@ -801,6 +795,7 @@ try:
                         a_est = a_est + beta * innovation / dt
                         rollerSpeed = w_est
                         systemAccel = a_est
+
 
                         engineSpeed = rollerSpeed*gr
                         turbineSpeed = rollerSpeed*5/4
