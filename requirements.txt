@@ -2,3 +2,4 @@ influxdb-client
 rich
 tk
 pytz
+numpy

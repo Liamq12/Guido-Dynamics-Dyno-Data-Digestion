@@ -9,6 +9,57 @@ import math
 import pytz
 from pathlib import Path
 from datetime import timedelta, timezone, datetime
+import numpy as np
+
+class LiveSpeedFilter:
+    def __init__(self, dt=0.01, sigma_a=0.1, r_value=0.5):
+        # Pre-compute constant matrices
+        self.dt = dt
+        self.A = np.array([[1.0, dt], 
+                           [0.0, 1.0]])
+        self.AT = self.A.T
+        self.H = np.array([[1.0, 0.0]])
+        self.HT = self.H.T
+        self.I = np.eye(2)
+
+        # Tuning Parameters
+        # Using the sigma_a approach for a more physical Q
+        self.Q = np.array([[0.25 * (dt**4), 0.5 * (dt**3)],
+                           [0.5 * (dt**3), dt**2]]) * (sigma_a**2)
+        self.R = r_value
+
+        # Initial State
+        self.x = np.zeros((2, 1))
+        self.P = np.eye(2)
+
+    def update(self, z):
+        """
+        Processes a single new measurement. 
+        Call this every time a sensor reading arrives.
+        """
+        # 1. PREDICT
+        # x = A * x
+        x_p = self.A @ self.x
+        # P = A * P * A' + Q
+        P_p = (self.A @ self.P @ self.AT) + self.Q
+
+        # 2. UPDATE
+        # Innovation (scalar since H is [1, 0])
+        y = z - x_p[0, 0]
+        
+        # Innovation Covariance (S is 1x1, so we treat it as a scalar)
+        # S = H * P * H' + R
+        s_scalar = P_p[0, 0] + self.R
+        
+        # Kalman Gain (Avoids np.linalg.inv)
+        # K = (P * H') / S
+        k_vec = P_p[:, 0:1] / s_scalar
+
+        # Update State and Covariance
+        self.x = x_p + k_vec * y
+        self.P = (self.I - k_vec @ self.H) @ P_p
+
+        return self.x[0, 0], self.x[1, 0]
 
 #This is a test change Again
 
@@ -175,6 +226,9 @@ def IPC(conn):
                 elif msg == "Start":
                     print("start ramp")
                     message = f"COPID,ACU,0"
+                    if(udp_connection):
+                        sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
+                    message = f"ENPID,RPM,1"
                     if(udp_connection):
                         sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
                     time.sleep(0.05)
@@ -640,6 +694,7 @@ while udp_connection == False:
     #     print("Excepted here")
     #     print(e)
 
+
 #---This is the main loop that runs, takes data from the UDP connection and posts it to influx -----#
 try:
     #setup default var values
@@ -668,6 +723,8 @@ try:
     engineTorque = [0, 0, 0]
     alpha = 0.4
     beta = 0.1
+
+    filter = LiveSpeedFilter(dt=0.05, sigma_a=14.14, r_value=0.7)
     while True:
         try: #read data from ethernet connection and upload to influxdb
             #check queues to see if the variable have been updated in another thread
@@ -802,11 +859,14 @@ try:
                         #calculate all the rotational speeds. Assign each speed a label and value
                         rawSpeed = value
                         w_measured = rawSpeed
-                        innovation = w_measured - w_est - a_est * dt
-                        w_est = w_est + a_est * dt + alpha * innovation
-                        a_est = a_est + beta * innovation / dt
-                        rollerSpeed = w_est
-                        systemAccel = a_est
+                        # innovation = w_measured - w_est - a_est * dt
+                        # w_est = w_est + a_est * dt + alpha * innovation
+                        # a_est = a_est + beta * innovation / dt
+                        rollerSpeed, systemAccel = filter.update(w_measured)
+                        # rollerSpeed = w_est
+                        # systemAccel = a_est
+
+
 
 
                         engineSpeed = rollerSpeed*gr
