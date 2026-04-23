@@ -52,7 +52,7 @@ class TerminalInterface:
         self.hitorque = False
         self.smoothStart = False
         
-        self.remote_mode = 1 # Should make this changable from the invocation
+        self.remote_mode = 0 # Should make this changable from the invocation
 
         self.gr_calc = 0
 
@@ -958,10 +958,14 @@ class TerminalInterface:
             
             # Main display loop
             with Live(self.make_layout(), refresh_per_second=10, screen=True) as live:
+                last_alive = time.time()
                 if(not self.influx_json_read):
                     self.active_tab = -1 #fake tab for one-time setup of influxdb
                 while self.running:
                     live.update(self.make_layout())
+                    if (time.time() - last_alive) > 30:
+                        self.ipc_conn.send("terminal alive")
+                        last_alive = time.time()
                     try:
                         self.current_engine_speed = self.get_last_speed()*self.gear_ratio
                         if self.is_ramping and self.current_engine_speed > self.end_rpm:

@@ -8,6 +8,6 @@
   "Start": "5000",
   "End": "13000",
   "Rate": "1250",
-  "StopMode": "Hold",
-  "HiTorque": "Off"
+  "SmoothStart": "On",
+  "InitialLoad": "13"
 }

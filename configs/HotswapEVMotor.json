@@ -1,0 +1,14 @@
+{
+  "Name": "EVHotswapMotor",
+  "Gear Ratio": 4.646,
+  "ID": "0",
+  "Version": "1.0",
+
+  "Mode": "Ramp",
+  "Start": "1000",
+  "End": "5400",
+  "Rate": "1000",
+  "SmoothStart": "Off",
+  "InitialLoad": "0",
+  "HiTorque": "On"
+}

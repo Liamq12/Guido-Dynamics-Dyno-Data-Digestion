@@ -2,4 +2,5 @@
 /configs/influxdb.json
 /configs/~influxdb.json
 configs/System/influxdb.json
+configs/System/dyno_mechanical.json
 venv

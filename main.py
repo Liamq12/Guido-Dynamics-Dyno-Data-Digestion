@@ -35,8 +35,17 @@ loadcellTF = 0.002 # 0.00290249433107  # Volts per lbf
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
 
+remote = 0
+
 BASE_DIR = Path(__file__).parent
-influx_file_path = BASE_DIR / "configs" / "System" / "influxdb.json"
+if remote:
+    influx_file_path = BASE_DIR / "configs" / "System" / "influxdb-remote.json"
+    INFLUX_URL = "http://fsaelinux:8086"
+else:
+    influx_file_path = BASE_DIR / "configs" / "System" / "influxdb.json"
+    INFLUX_URL = "http://localhost:8086"
+
+
 mechanical_file_path = BASE_DIR / "configs" / "System" / "dyno_mechanical.json"
 
 #influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
@@ -45,7 +54,6 @@ try:
     #open the influxdb.json file for token, bucket, org
     with open(influx_file_path, 'r', encoding='utf-8') as f:
         json_data = json.load(f)
-        INFLUX_URL = "http://localhost:8086"
         TOKEN = json_data.get("Token")
         ORG = json_data.get("Org")
         BUCKET = json_data.get("Bucket")
@@ -122,6 +130,7 @@ def ipc_server():
     print("IPC server waiting for connection...")
     while True:
         try:
+            print("waiting for IPC connection")
             conn = ipc_listener.accept()  # blocks until a client connects
             print("IPC client connected")
             IPC(conn)  # runs until client disconnects
@@ -132,10 +141,16 @@ def ipc_server():
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
+        last_alive = time.time()
         trigger_on = 0
         while True:
             try:
-                msg = conn.recv()
+                if conn.poll(60):
+                    msg = conn.recv()
+                    last_alive = time.time()
+                else:
+                    raise TimeoutError
+            
                 #when start RPM is set, we automatically target this value until the user starts the ramp
                 if msg == "Start RPM":
                     print("start RPM")
@@ -240,13 +255,17 @@ def IPC(conn):
                     ring_bell.clear()
                 else:
                     print(msg)
+            except TimeoutError:
+                print("Request timed out - no data received within 60 seconds.")
+                if (time.time() - last_alive) > 60:
+                    print("haven't received alive signal recently. closing connection")
+                    return
             except EOFError:
                 print("IPC client disconnected")
                 return
             except Exception as e:
                 print(f"IPC error: {e}")
                 return
-
 
 #thread for reading data from influxdb
 def influx_to_stm32():
@@ -305,6 +324,7 @@ def influx_to_stm32():
             print(e)
             continue
         time.sleep(1)
+        
 
 #start the IPC thread
 # IPC_t = threading.Thread(target=IPC, daemon=True, args=(ipc_conn,))
@@ -368,8 +388,10 @@ def write_zero_torque(b):
 # ---------- UDP SETUP --------
 # Begin the UDP connection to the DAQ--
 try:
+    print("starting ipc")
     IPC_t = threading.Thread(target=ipc_server, daemon=True)
     IPC_t.start()   
+    print("starting socket")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(5.0)
@@ -377,7 +399,6 @@ try:
     #enable sending/receiving data
     udp_connection = True
 except Exception as e:
-    #duplicate of the real while loop, below, that runs the bulk of the program. This is just for debug purposes and is likely out of date. 
     # TODO make a function so this is more readable and comparable to the real loop
     running = False
     trigger_on = 0
@@ -619,9 +640,6 @@ except Exception as e:
                 .field("value", float(rawLoadVoltage)) #post raw loadcell voltage to influx
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-
-            
 
     except KeyboardInterrupt:
         print("cancelled")

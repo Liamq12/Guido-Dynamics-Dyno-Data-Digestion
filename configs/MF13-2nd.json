@@ -1,13 +1,12 @@
 {
-  "Name": "MF13_4th",
-  "Gear Ratio": 5.072,
+  "Name": "MF13_2",
+  "Gear Ratio": 1,
   "ID": "c1b6e18sssss8",
   "Version": "1.0.0",
 
   "Mode": "Ramp",
   "Start": "4000",
   "End": "13000",
-  "Rate": "1000",
-  "StopMode": "Hold",
-  "HiTorque": "On"
+  "Rate": "450",
+  "StopMode": "Hold"
 }
