@@ -36,7 +36,7 @@ loadcellTF = 0.002 # 0.00290249433107  # Volts per lbf
 #load in the influx db file and mechanical config
 
 BASE_DIR = Path(__file__).parent
-influx_file_path = BASE_DIR / "configs" / "System" / "influxdb.json"
+influx_file_path = BASE_DIR / "configs" / "System" / "influxdb-remote.json"
 mechanical_file_path = BASE_DIR / "configs" / "System" / "dyno_mechanical.json"
 
 #influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
@@ -374,8 +374,10 @@ def write_zero_torque(b):
 # ---------- UDP SETUP --------
 # Begin the UDP connection to the DAQ--
 try:
+    print("starting IPC")
     IPC_t = threading.Thread(target=ipc_server, daemon=True)
     IPC_t.start()   
+    print("binding to socket")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(5.0)
