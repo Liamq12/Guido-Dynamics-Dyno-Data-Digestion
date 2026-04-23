@@ -32,6 +32,8 @@ udp_connection = False
 loadcellZero = 1.660
 loadcellTF = 0.002 # 0.00290249433107  # Volts per lbf
 
+# sock = None
+
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
 
@@ -373,269 +375,270 @@ def write_zero_torque(b):
 
 # ---------- UDP SETUP --------
 # Begin the UDP connection to the DAQ--
-try:
-    print("starting IPC")
-    IPC_t = threading.Thread(target=ipc_server, daemon=True)
-    IPC_t.start()   
-    print("binding to socket")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.settimeout(5.0)
-    print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
-    #enable sending/receiving data
-    udp_connection = True
-except Exception as e:
-    #duplicate of the real while loop, below, that runs the bulk of the program. This is just for debug purposes and is likely out of date. 
-    # TODO make a function so this is more readable and comparable to the real loop
-    running = False
-    trigger_on = 0
-    trigger_off = 0
-    udp_connection = False
-    print(f"no connection, just chilling: {e}")
+udp_connection = False
+print("starting IPC")
+IPC_t = threading.Thread(target=ipc_server, daemon=True)
+IPC_t.start()  
+while udp_connection == False:
     try:
-        freq = 10
-        dt = 1/freq
-        tc = [0, 0.05, 0.1]
-        tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
-        a_est = 0
-        w_est = 0
-        T_filtered_prev = [0, 0, 0]
-        T_filtered = [0, 0, 0]
-        torqueCorrected = [0, 0, 0]
-        T_double_filtered_prev = [0, 0, 0]
-        T_double_filtered = [0, 0, 0]
-        engineTorque = [0, 0, 0]
-        alpha = 0.4
-        beta = 0.1
-        #creates functions to generate fake torque and speed data for debug
-        def fake_speed_data():
-            now = time.time()
-            f1 = 1000*math.sin(now*0.1) + 1250
-            f2 = 100*math.sin(now)
-            speed = f1 + f2 + random.gauss(1, 1)
-            return speed
-        def fake_torque_data():
-            now = time.time()
-            f1 = 30
-            f2 = 10*math.sin(now)
-            torque = f1 + f2 + random.gauss(1, 1)
-            return torque
-        #the loop of the program
-        while True:
-            time.sleep(1/freq)
-            #check queues to see if the variable have been updated in another thread
-            if not gr_queue.empty():
-                gr = gr_queue.get()
-            if not config_queue.empty():
-                config_name = config_queue.get()
-                date = datetime.today().strftime('%m-%d')
-                config_name = f'{config_name}_({date})'
-                run_num = get_last_pull_num(config_name)
-            if not run_on_trigger_q.empty():
-                trigger_on = run_on_trigger_q.get()
-            if not run_off_trigger_q.empty():
-                trigger_off = run_off_trigger_q.get()
-        
-            #speed is pulled from fake speed data function
-            value = fake_speed_data()
-            loadValue = fake_torque_data()
-            device = 'test'
-            unit = 'rpm'
-
-            rawSpeed = value
-            w_measured = rawSpeed
-            innovation = w_measured - w_est - a_est * dt
-            w_est = w_est + a_est * dt + alpha * innovation
-            a_est = a_est + beta * innovation / dt
-            rollerSpeed = w_est
-            systemAccel = a_est
-
-            engineSpeed = rollerSpeed*gr
-            turbineSpeed = rollerSpeed*5/4
-            roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
-            speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
-            speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
-
-            #run name for batching purposes
-            run_name = "None"
-            #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
-            if running_event.is_set():
-                if smooth_start_run.is_set() and not run_started.is_set():
-                    if value > trigger_on:
-                        run_started.set()
-                        print("Run started, now we enable PID")
-                if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
-                    if(value > trigger_off and running): #we have exceeded trigger off but still in a run, so let's disable the run
-                        running_event.clear()
-                        running = False
-                        run_name = "None"
-                        print(f"Run Turned Off. On trigger is: {trigger_on}")
-                    elif (value > trigger_off and not running): #we have exceeded the trigger off and run is already disabled, do nothing
-                        run_name = "None"
-                    elif (value > trigger_on and not running): #we have exceeded the trigger on and not in a run, so we want to enable a run
-                        run_num += 1 #increment run number
-                        running = True
-                        run_name = f"{config_name}_{run_num}"
-                        print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
-                        point = (
-                            Point("runData")
-                            .tag("device", device)
-                            .tag("unit", "none")
-                            .field("value", run_name)
-                            )
-                        write_api.write(bucket=BUCKET, org=ORG, record=point) #write the new run name to influx so we can pull from it
-                    elif ( value < trigger_on*0.75 and running): #we're in a run but we fell so far below the trigger on that we're going to cancel it
-                        running_event.clear()
-                        running = False
-                        run_name = "None"
-                        print(f"Run Turned Off. On trigger is: {trigger_on}")
-                    elif (running): #nothing told us to turn off the run so we'll continue as normal
-                        run_name = f"{config_name}_{run_num}"
-                else: #we know we are in hold mode
-                    if(value < trigger_off and running): #in hold mode trigger off is below trigger on. The speed dipped below trigger off so we cancel the run
-                        running = False
-                        run_name = "None"
-                        print(f"Run Turned Off. On trigger is: {trigger_on}")
-                    elif (value < trigger_off and not running): #not running
-                        run_name = "None"
-                    elif (value > trigger_on and not running): #we have passed the trigger on so we will start a new run
-                        run_num += 1
-                        running = True
-                        run_name = f"{config_name}_{run_num}"
-                        print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
-                        point = (
-                            Point("runData")
-                            .tag("device", device)
-                            .tag("unit", "none")
-                            .field("value", run_name)
-                            )
-                        write_api.write(bucket=BUCKET, org=ORG, record=point)
-                    elif (running):
-                        run_name = f"{config_name}_{run_num}"
-            else:
-                if running: #the running flag was disabled so we will stop the current run
-                    running = False
-                    run_name = "None"
-            if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
-                run_started.clear()
-                smooth_start_run.clear()
-                print("run reset")
-
-            for i in range(0,len(speedLabels)): #iterate through each speed label and post its corresponding value to influx
-                if(speedLabels[i] == 'roadSpeed'):
-                    unit = 'mph'
-                else:
-                    unit = 'rpm'
-                point = (
-                    Point(speedLabels[i])
-                    .tag("device", device)
-                    .tag("unit", unit)
-                    .tag("runName", run_name)
-                    .field("value", float(speedValues[i]))
-                    )
-                write_api.write(bucket=BUCKET, org=ORG, record=point)
-            
-            for i in range(0, 3):              
-                T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]
-                T_filtered_prev[i] = T_filtered[i]
-                
-                torqueCorrected[i] = (T_filtered[i]*(5/4) + momentI*systemAccel) #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
-                T_double_filtered[i] = tau[i] * torqueCorrected[i] + (1 - tau[i]) * T_double_filtered_prev[i]
-                
-                T_double_filtered_prev[i] = T_double_filtered[i]
-                engineTorque[i] = (T_double_filtered[i] + rolling_resistance(rollerSpeed))/gr
-
-                correctionFactor = 1.25
-                
-                point = (
-                    Point("engineTorque")
-                    .tag("device", device)
-                    .tag("unit", "lbf-ft")
-                    .tag("runName", run_name)
-                    .tag("smoothing", i)
-                    .tag("SAE", "Off")
-                    .field("value", float(engineTorque[i]))
-                )
-                write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
-
-                point = (
-                    Point("enginePower")
-                    .tag("device", device)
-                    .tag("unit", "HP")
-                    .tag("runName", run_name)
-                    .tag("smoothing", i)
-                    .tag("SAE", "Off")
-                    .field("value", float(engineTorque[i]*engineSpeed/5252))
-                )
-                write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-                point = (
-                    Point("engineTorque")
-                    .tag("device", device)
-                    .tag("unit", "lbf-ft")
-                    .tag("runName", run_name)
-                    .tag("smoothing", i)
-                    .tag("SAE", "On")
-                    .field("value", float(engineTorque[i]*correctionFactor))
-                )
-                write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
-
-                point = (
-                    Point("enginePower")
-                    .tag("device", device)
-                    .tag("unit", "HP")
-                    .tag("runName", run_name)
-                    .tag("smoothing", i)
-                    .tag("SAE", "On")
-                    .field("value", float(engineTorque[i]*correctionFactor*engineSpeed/5252))
-                )
-                write_api.write(bucket=BUCKET, org=ORG, record=point)
-                
-
-            point = (
-                Point("wheelAccel")
-                .tag("device", device)
-                .tag("unit", "RPM/s")
-                .tag("runName", run_name)
-                .field("value", systemAccel)
-            )
-            write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-            point = (
-                Point("power")
-                .tag("device", device)
-                .tag("unit", "HP")
-                .tag("runName", run_name)
-                .field("value", float(loadValue*turbineSpeed/5252))
-            )
-            write_api.write(bucket=BUCKET, org=ORG, record=point) #post power value to influx
-
-            point = (
-                Point("dynoLoad")
-                .tag("device", device)
-                .tag("unit", "ft-lbf")
-                .tag("runName", run_name)
-                .field("value", float(loadValue)) #post measured torque value to influx
-            )
-            write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-            point = (
-                Point("rawLoadVoltage")
-                .tag("device", device)
-                .tag("unit", "ft-lbf")
-                .tag("runName", run_name)
-                .field("value", float(rawLoadVoltage)) #post raw loadcell voltage to influx
-            )
-            write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-
-            
-
-    except KeyboardInterrupt:
-        print("cancelled")
+        print("binding to socket")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((UDP_IP, UDP_PORT))
+        sock.settimeout(5.0)
+        print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
+        #enable sending/receiving data
+        udp_connection = True
     except Exception as e:
-        print("Excepted here")
-        print(e)
+        #duplicate of the real while loop, below, that runs the bulk of the program. This is just for debug purposes and is likely out of date. 
+        # TODO make a function so this is more readable and comparable to the real loop
+        running = False
+        trigger_on = 0
+        trigger_off = 0
+        udp_connection = False
+        print(f"no connection, just chilling: {e}")
+        time.sleep(1)
+        
+    # try:
+    #     freq = 10
+    #     dt = 1/freq
+    #     tc = [0, 0.05, 0.1]
+    #     tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
+    #     a_est = 0
+    #     w_est = 0
+    #     T_filtered_prev = [0, 0, 0]
+    #     T_filtered = [0, 0, 0]
+    #     torqueCorrected = [0, 0, 0]
+    #     T_double_filtered_prev = [0, 0, 0]
+    #     T_double_filtered = [0, 0, 0]
+    #     engineTorque = [0, 0, 0]
+    #     alpha = 0.4
+    #     beta = 0.1
+    #     #creates functions to generate fake torque and speed data for debug
+    #     def fake_speed_data():
+    #         now = time.time()
+    #         f1 = 1000*math.sin(now*0.1) + 1250
+    #         f2 = 100*math.sin(now)
+    #         speed = f1 + f2 + random.gauss(1, 1)
+    #         return speed
+    #     def fake_torque_data():
+    #         now = time.time()
+    #         f1 = 30
+    #         f2 = 10*math.sin(now)
+    #         torque = f1 + f2 + random.gauss(1, 1)
+    #         return torque
+    #     #the loop of the program
+    #     while True:
+    #         time.sleep(1/freq)
+    #         #check queues to see if the variable have been updated in another thread
+    #         if not gr_queue.empty():
+    #             gr = gr_queue.get()
+    #         if not config_queue.empty():
+    #             config_name = config_queue.get()
+    #             date = datetime.today().strftime('%m-%d')
+    #             config_name = f'{config_name}_({date})'
+    #             run_num = get_last_pull_num(config_name)
+    #         if not run_on_trigger_q.empty():
+    #             trigger_on = run_on_trigger_q.get()
+    #         if not run_off_trigger_q.empty():
+    #             trigger_off = run_off_trigger_q.get()
+        
+    #         #speed is pulled from fake speed data function
+    #         value = fake_speed_data()
+    #         loadValue = fake_torque_data()
+    #         device = 'test'
+    #         unit = 'rpm'
+
+    #         rawSpeed = value
+    #         w_measured = rawSpeed
+    #         innovation = w_measured - w_est - a_est * dt
+    #         w_est = w_est + a_est * dt + alpha * innovation
+    #         a_est = a_est + beta * innovation / dt
+    #         rollerSpeed = w_est
+    #         systemAccel = a_est
+
+    #         engineSpeed = rollerSpeed*gr
+    #         turbineSpeed = rollerSpeed*5/4
+    #         roadSpeed = (rollerSpeed*(2*3.14159/60)*4.5)/17.6
+    #         speedLabels = ['rawSpeed', 'rollerSpeed', 'engineSpeed', 'turbineSpeed', 'roadSpeed']
+    #         speedValues = [rawSpeed, rollerSpeed, engineSpeed, turbineSpeed, roadSpeed]
+
+    #         #run name for batching purposes
+    #         run_name = "None"
+    #         #the user terminal sets the event that a run is "running". It then uses the triggers to determine if we should actually put it in a batch or not
+    #         if running_event.is_set():
+    #             if smooth_start_run.is_set() and not run_started.is_set():
+    #                 if value > trigger_on:
+    #                     run_started.set()
+    #                     print("Run started, now we enable PID")
+    #             if (trigger_off > trigger_on): #we know we are in ramp mode when trigger_off > trigger_on
+    #                 if(value > trigger_off and running): #we have exceeded trigger off but still in a run, so let's disable the run
+    #                     running_event.clear()
+    #                     running = False
+    #                     run_name = "None"
+    #                     print(f"Run Turned Off. On trigger is: {trigger_on}")
+    #                 elif (value > trigger_off and not running): #we have exceeded the trigger off and run is already disabled, do nothing
+    #                     run_name = "None"
+    #                 elif (value > trigger_on and not running): #we have exceeded the trigger on and not in a run, so we want to enable a run
+    #                     run_num += 1 #increment run number
+    #                     running = True
+    #                     run_name = f"{config_name}_{run_num}"
+    #                     print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
+    #                     point = (
+    #                         Point("runData")
+    #                         .tag("device", device)
+    #                         .tag("unit", "none")
+    #                         .field("value", run_name)
+    #                         )
+    #                     write_api.write(bucket=BUCKET, org=ORG, record=point) #write the new run name to influx so we can pull from it
+    #                 elif ( value < trigger_on*0.75 and running): #we're in a run but we fell so far below the trigger on that we're going to cancel it
+    #                     running_event.clear()
+    #                     running = False
+    #                     run_name = "None"
+    #                     print(f"Run Turned Off. On trigger is: {trigger_on}")
+    #                 elif (running): #nothing told us to turn off the run so we'll continue as normal
+    #                     run_name = f"{config_name}_{run_num}"
+    #             else: #we know we are in hold mode
+    #                 if(value < trigger_off and running): #in hold mode trigger off is below trigger on. The speed dipped below trigger off so we cancel the run
+    #                     running = False
+    #                     run_name = "None"
+    #                     print(f"Run Turned Off. On trigger is: {trigger_on}")
+    #                 elif (value < trigger_off and not running): #not running
+    #                     run_name = "None"
+    #                 elif (value > trigger_on and not running): #we have passed the trigger on so we will start a new run
+    #                     run_num += 1
+    #                     running = True
+    #                     run_name = f"{config_name}_{run_num}"
+    #                     print(f"Run Triggered for {run_name} Off trigger is: {trigger_off}")
+    #                     point = (
+    #                         Point("runData")
+    #                         .tag("device", device)
+    #                         .tag("unit", "none")
+    #                         .field("value", run_name)
+    #                         )
+    #                     write_api.write(bucket=BUCKET, org=ORG, record=point)
+    #                 elif (running):
+    #                     run_name = f"{config_name}_{run_num}"
+    #         else:
+    #             if running: #the running flag was disabled so we will stop the current run
+    #                 running = False
+    #                 run_name = "None"
+    #         if run_started.is_set() and value < trigger_on: #the run was started but rpms have dipped below start rpm - either before or after a full pull. Resend start rpm to STM
+    #             run_started.clear()
+    #             smooth_start_run.clear()
+    #             print("run reset")
+
+    #         for i in range(0,len(speedLabels)): #iterate through each speed label and post its corresponding value to influx
+    #             if(speedLabels[i] == 'roadSpeed'):
+    #                 unit = 'mph'
+    #             else:
+    #                 unit = 'rpm'
+    #             point = (
+    #                 Point(speedLabels[i])
+    #                 .tag("device", device)
+    #                 .tag("unit", unit)
+    #                 .tag("runName", run_name)
+    #                 .field("value", float(speedValues[i]))
+    #                 )
+    #             write_api.write(bucket=BUCKET, org=ORG, record=point)
+            
+    #         for i in range(0, 3):              
+    #             T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]
+    #             T_filtered_prev[i] = T_filtered[i]
+                
+    #             torqueCorrected[i] = (T_filtered[i]*(5/4) + momentI*systemAccel) #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
+    #             T_double_filtered[i] = tau[i] * torqueCorrected[i] + (1 - tau[i]) * T_double_filtered_prev[i]
+                
+    #             T_double_filtered_prev[i] = T_double_filtered[i]
+    #             engineTorque[i] = (T_double_filtered[i] + rolling_resistance(rollerSpeed))/gr
+
+    #             correctionFactor = 1.25
+                
+    #             point = (
+    #                 Point("engineTorque")
+    #                 .tag("device", device)
+    #                 .tag("unit", "lbf-ft")
+    #                 .tag("runName", run_name)
+    #                 .tag("smoothing", i)
+    #                 .tag("SAE", "Off")
+    #                 .field("value", float(engineTorque[i]))
+    #             )
+    #             write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
+
+    #             point = (
+    #                 Point("enginePower")
+    #                 .tag("device", device)
+    #                 .tag("unit", "HP")
+    #                 .tag("runName", run_name)
+    #                 .tag("smoothing", i)
+    #                 .tag("SAE", "Off")
+    #                 .field("value", float(engineTorque[i]*engineSpeed/5252))
+    #             )
+    #             write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+    #             point = (
+    #                 Point("engineTorque")
+    #                 .tag("device", device)
+    #                 .tag("unit", "lbf-ft")
+    #                 .tag("runName", run_name)
+    #                 .tag("smoothing", i)
+    #                 .tag("SAE", "On")
+    #                 .field("value", float(engineTorque[i]*correctionFactor))
+    #             )
+    #             write_api.write(bucket=BUCKET, org=ORG, record=point) #post engine torque value to influx
+
+    #             point = (
+    #                 Point("enginePower")
+    #                 .tag("device", device)
+    #                 .tag("unit", "HP")
+    #                 .tag("runName", run_name)
+    #                 .tag("smoothing", i)
+    #                 .tag("SAE", "On")
+    #                 .field("value", float(engineTorque[i]*correctionFactor*engineSpeed/5252))
+    #             )
+    #             write_api.write(bucket=BUCKET, org=ORG, record=point)
+                
+
+    #         point = (
+    #             Point("wheelAccel")
+    #             .tag("device", device)
+    #             .tag("unit", "RPM/s")
+    #             .tag("runName", run_name)
+    #             .field("value", systemAccel)
+    #         )
+    #         write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+    #         point = (
+    #             Point("power")
+    #             .tag("device", device)
+    #             .tag("unit", "HP")
+    #             .tag("runName", run_name)
+    #             .field("value", float(loadValue*turbineSpeed/5252))
+    #         )
+    #         write_api.write(bucket=BUCKET, org=ORG, record=point) #post power value to influx
+
+    #         point = (
+    #             Point("dynoLoad")
+    #             .tag("device", device)
+    #             .tag("unit", "ft-lbf")
+    #             .tag("runName", run_name)
+    #             .field("value", float(loadValue)) #post measured torque value to influx
+    #         )
+    #         write_api.write(bucket=BUCKET, org=ORG, record=point)
+
+    #         point = (
+    #             Point("rawLoadVoltage")
+    #             .tag("device", device)
+    #             .tag("unit", "ft-lbf")
+    #             .tag("runName", run_name)
+    #             .field("value", float(rawLoadVoltage)) #post raw loadcell voltage to influx
+    #         )
+    #         write_api.write(bucket=BUCKET, org=ORG, record=point)            
+
+    # except KeyboardInterrupt:
+    #     print("cancelled")
+    # except Exception as e:
+    #     print("Excepted here")
+    #     print(e)
 
 #---This is the main loop that runs, takes data from the UDP connection and posts it to influx -----#
 try:
