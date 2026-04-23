@@ -135,7 +135,10 @@ def IPC(conn):
         trigger_on = 0
         while True:
             try:
-                msg = conn.recv()
+                if conn.poll(60):
+                    msg = conn.recv()
+                else:
+                    raise TimeoutError
                 #when start RPM is set, we automatically target this value until the user starts the ramp
                 if msg == "Start RPM":
                     print("start RPM")
@@ -240,6 +243,9 @@ def IPC(conn):
                     ring_bell.clear()
                 else:
                     print(msg)
+            except TimeoutError:
+                print("No Alive Signal. Disconnect Client")
+                return
             except EOFError:
                 print("IPC client disconnected")
                 return
