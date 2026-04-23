@@ -35,14 +35,17 @@ loadcellTF = 0.002 # 0.00290249433107  # Volts per lbf
 # ---------- System Config Setup ----------
 #load in the influx db file and mechanical config
 
-remote = 1
+remote = 0
 
 BASE_DIR = Path(__file__).parent
 if remote:
     influx_file_path = BASE_DIR / "configs" / "System" / "influxdb-remote.json"
+    INFLUX_URL = "http://fsaelinux:8086"
 else:
     influx_file_path = BASE_DIR / "configs" / "System" / "influxdb.json"
-    
+    INFLUX_URL = "http://localhost:8086"
+
+
 mechanical_file_path = BASE_DIR / "configs" / "System" / "dyno_mechanical.json"
 
 #influx_file_path = os.path.join(os.getcwd(), "configs\\System\\influxdb.json")
@@ -51,7 +54,6 @@ try:
     #open the influxdb.json file for token, bucket, org
     with open(influx_file_path, 'r', encoding='utf-8') as f:
         json_data = json.load(f)
-        INFLUX_URL = "http://localhost:8086"
         TOKEN = json_data.get("Token")
         ORG = json_data.get("Org")
         BUCKET = json_data.get("Bucket")
@@ -265,7 +267,6 @@ def IPC(conn):
                 print(f"IPC error: {e}")
                 return
 
-
 #thread for reading data from influxdb
 def influx_to_stm32():
     last_valve_pos = None
@@ -323,6 +324,7 @@ def influx_to_stm32():
             print(e)
             continue
         time.sleep(1)
+        
 
 #start the IPC thread
 # IPC_t = threading.Thread(target=IPC, daemon=True, args=(ipc_conn,))
@@ -383,7 +385,20 @@ def write_zero_torque(b):
         json.dump(data, json_file, indent=4)
     print("load cell successfully zeroed and saved")  
 
-def fake_main_loop():
+# ---------- UDP SETUP --------
+# Begin the UDP connection to the DAQ--
+try:
+    print("starting ipc")
+    IPC_t = threading.Thread(target=ipc_server, daemon=True)
+    IPC_t.start()   
+    print("starting socket")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_IP, UDP_PORT))
+    sock.settimeout(5.0)
+    print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
+    #enable sending/receiving data
+    udp_connection = True
+except Exception as e:
     # TODO make a function so this is more readable and comparable to the real loop
     running = False
     trigger_on = 0
@@ -631,32 +646,6 @@ def fake_main_loop():
     except Exception as e:
         print("Excepted here")
         print(e)
-
-# ---------- UDP SETUP --------
-# Begin the UDP connection to the DAQ--
-try:
-    print("starting ipc")
-    IPC_t = threading.Thread(target=ipc_server, daemon=True)
-    IPC_t.start()   
-    print("starting socket")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.settimeout(5.0)
-    print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
-    #enable sending/receiving data
-    udp_connection = True
-except OSError as e:
-    print("Interface not available — device not connected.")
-    print("starting fake loop")
-    while True:
-        time.sleep(3)
-        # print("no device error")
-    # fake_main_loop()
-except Exception as e:
-    print(e)
-    while True:
-        time.sleep(1)
-        print("other error")
 
 #---This is the main loop that runs, takes data from the UDP connection and posts it to influx -----#
 try:
