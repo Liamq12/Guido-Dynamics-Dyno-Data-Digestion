@@ -122,6 +122,7 @@ def ipc_server():
     print("IPC server waiting for connection...")
     while True:
         try:
+            print("waiting for IPC connection")
             conn = ipc_listener.accept()  # blocks until a client connects
             print("IPC client connected")
             IPC(conn)  # runs until client disconnects
@@ -132,10 +133,16 @@ def ipc_server():
 
 #interprocess communication that uses a socket to receive data from the user terminal
 def IPC(conn):
+        last_alive = time.time()
         trigger_on = 0
         while True:
             try:
-                msg = conn.recv()
+                if conn.poll(60):
+                    msg = conn.recv()
+                    last_alive = time.time()
+                else:
+                    raise TimeoutError
+            
                 #when start RPM is set, we automatically target this value until the user starts the ramp
                 if msg == "Start RPM":
                     print("start RPM")
@@ -240,6 +247,11 @@ def IPC(conn):
                     ring_bell.clear()
                 else:
                     print(msg)
+            except TimeoutError:
+                print("Request timed out - no data received within 60 seconds.")
+                if (time.time() - last_alive) > 60:
+                    print("haven't received alive signal recently. closing connection")
+                    return
             except EOFError:
                 print("IPC client disconnected")
                 return
@@ -365,19 +377,7 @@ def write_zero_torque(b):
         json.dump(data, json_file, indent=4)
     print("load cell successfully zeroed and saved")  
 
-# ---------- UDP SETUP --------
-# Begin the UDP connection to the DAQ--
-try:
-    IPC_t = threading.Thread(target=ipc_server, daemon=True)
-    IPC_t.start()   
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.settimeout(5.0)
-    print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
-    #enable sending/receiving data
-    udp_connection = True
-except Exception as e:
-    #duplicate of the real while loop, below, that runs the bulk of the program. This is just for debug purposes and is likely out of date. 
+def fake_main_loop():
     # TODO make a function so this is more readable and comparable to the real loop
     running = False
     trigger_on = 0
@@ -620,14 +620,37 @@ except Exception as e:
             )
             write_api.write(bucket=BUCKET, org=ORG, record=point)
 
-
-            
-
     except KeyboardInterrupt:
         print("cancelled")
     except Exception as e:
         print("Excepted here")
         print(e)
+
+# ---------- UDP SETUP --------
+# Begin the UDP connection to the DAQ--
+try:
+    print("starting ipc")
+    IPC_t = threading.Thread(target=ipc_server, daemon=True)
+    IPC_t.start()   
+    print("starting socket")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_IP, UDP_PORT))
+    sock.settimeout(5.0)
+    print(f"Listening for UDP packets on {UDP_IP}:{UDP_PORT}...")
+    #enable sending/receiving data
+    udp_connection = True
+except OSError as e:
+    print("Interface not available — device not connected.")
+    print("starting fake loop")
+    while True:
+        time.sleep(3)
+        # print("no device error")
+    # fake_main_loop()
+except Exception as e:
+    print(e)
+    while True:
+        time.sleep(1)
+        print("other error")
 
 #---This is the main loop that runs, takes data from the UDP connection and posts it to influx -----#
 try:
