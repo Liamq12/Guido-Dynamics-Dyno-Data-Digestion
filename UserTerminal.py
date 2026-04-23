@@ -52,7 +52,7 @@ class TerminalInterface:
         self.hitorque = False
         self.smoothStart = False
         
-        self.remote_mode = 0 # Should make this changable from the invocation
+        self.remote_mode = 1 # Should make this changable from the invocation
 
         self.gr_calc = 0
 
