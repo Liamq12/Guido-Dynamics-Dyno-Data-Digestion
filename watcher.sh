@@ -23,7 +23,11 @@ cleanup() {
     echo "Ctrl+C detected. Shutting down..."
     stop_app
     echo "Killing ssh-agent..."
+<<<<<<< HEAD
     sudo pkill -f "main.py"
+=======
+    pkill -f "main.py"
+>>>>>>> 558eee3 (watcher)
     echo "Done."
     exit 0
 }
