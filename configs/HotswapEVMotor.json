@@ -1,0 +1,12 @@
+{
+  "Name": "Hotswap EV Motor",
+  "Gear Ratio": 3.9,
+  "ID": "c1b6e2c4",
+  "Version": "1.0.0",
+
+  "Mode": "Ramp",
+  "Start": "500",
+  "End": "5500",
+  "Rate": "1500",
+  "HiTorque": "On"
+}

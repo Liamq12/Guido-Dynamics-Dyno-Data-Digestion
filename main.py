@@ -713,18 +713,20 @@ try:
         )
     write_api.write(bucket=BUCKET, org=ORG, record=point) #post blank run data to make sure we don't have null value problems
     
-    a_est = 0
-    w_est = 0
+    # a_est = 0
+    # w_est = 0
     T_filtered_prev = [0, 0, 0]
     T_filtered = [0, 0, 0]
     torqueCorrected = [0, 0, 0]
-    T_double_filtered_prev = [0, 0, 0]
-    T_double_filtered = [0, 0, 0]
+    # T_double_filtered_prev = [0, 0, 0]
+    # T_double_filtered = [0, 0, 0]
     engineTorque = [0, 0, 0]
-    alpha = 0.4
-    beta = 0.1
-
-    filter = LiveSpeedFilter(dt=0.05, sigma_a=14.14, r_value=0.7)
+    # alpha = 0.4
+    # beta = 0.1
+    sigma_a = 44.7
+    r_value = 0.2
+    dt_used = 0.05
+    filter = LiveSpeedFilter(dt=dt_used, sigma_a=sigma_a, r_value=r_value)
     while True:
         try: #read data from ethernet connection and upload to influxdb
             #check queues to see if the variable have been updated in another thread
@@ -806,6 +808,10 @@ try:
             tc = [0, 0.05, 0.1]
             tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
             
+            if not dt == dt_used: #change filter parameters if actual sample rate is not 20Hz
+                dt_used = dt
+                filter = LiveSpeedFilter(dt=dt_used, sigma_a=sigma_a, r_value=r_value)
+
             correctionFactor = sae_correction(pressure, temp, humidity)
 
             # print(f"Device: {device}, Uptime: {uptime}, ID: {device_id}")
@@ -961,15 +967,20 @@ try:
                             if(udp_connection):
                                 sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
 
+                        if math.abs(loadValue - T_filtered_prev[0]) > 6: #if torque is rising super fast we don't want to filter it so much
+                            tau = [0.8, 0.8, 0.8]
+                        else:
+                            tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
+                            
                         for i in range(0, 3):              
                             T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]
                             T_filtered_prev[i] = T_filtered[i]
                             
                             torqueCorrected[i] = (T_filtered[i]*(5/4) + momentI*systemAccel) #calculate engine torque using gear ratio and acceleration of rollers with moment of inertia
-                            T_double_filtered[i] = tau[i] * torqueCorrected[i] + (1 - tau[i]) * T_double_filtered_prev[i]
-                            
-                            T_double_filtered_prev[i] = T_double_filtered[i]
-                            engineTorque[i] = (T_double_filtered[i] + rolling_resistance(rollerSpeed))/gr
+                            # T_double_filtered[i] = tau[i] * torqueCorrected[i] + (1 - tau[i]) * T_double_filtered_prev[i]
+                            # T_double_filtered_prev[i] = T_double_filtered[i]
+
+                            engineTorque[i] = (torqueCorrected[i] + rolling_resistance(rollerSpeed))/gr
 
                             point = (
                                 Point("engineTorque")
