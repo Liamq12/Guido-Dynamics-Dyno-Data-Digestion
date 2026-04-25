@@ -41,12 +41,18 @@ class LiveSpeedFilter:
         # x = A * x
         x_p = self.A @ self.x
         # P = A * P * A' + Q
-        P_p = (self.A @ self.P @ self.AT) + self.Q
-
+        
         # 2. UPDATE
         # Innovation (scalar since H is [1, 0])
         y = z - x_p[0, 0]
+
+        if (abs(y) > 25):
+            Q_current = self.Q*10
+        else:
+            Q_current = self.Q
         
+        P_p = 1.1*(self.A @ self.P @ self.AT) + Q_current
+
         # Innovation Covariance (S is 1x1, so we treat it as a scalar)
         # S = H * P * H' + R
         s_scalar = P_p[0, 0] + self.R
@@ -723,8 +729,8 @@ try:
     engineTorque = [0, 0, 0]
     # alpha = 0.4
     # beta = 0.1
-    sigma_a = 44.7
-    r_value = 0.2
+    sigma_a = 1.732
+    r_value = 0.1
     dt_used = 0.05
     filter = LiveSpeedFilter(dt=dt_used, sigma_a=sigma_a, r_value=r_value)
     while True:
@@ -966,11 +972,6 @@ try:
                             message = f"ENPID,RPM,1"
                             if(udp_connection):
                                 sock_send.sendto(message.encode(), (UDP_IP_SEND, UDP_PORT_SEND))
-
-                        if math.abs(loadValue - T_filtered_prev[0]) > 6: #if torque is rising super fast we don't want to filter it so much
-                            tau = [0.8, 0.8, 0.8]
-                        else:
-                            tau = [dt / (tc[0] + dt), dt / (tc[1] + dt), dt / (tc[2] + dt)]
                             
                         for i in range(0, 3):              
                             T_filtered[i] = tau[i] * loadValue + (1 - tau[i]) * T_filtered_prev[i]
