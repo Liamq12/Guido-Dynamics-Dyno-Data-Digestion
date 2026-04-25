@@ -1,0 +1,12 @@
+{
+  "Name": "Datsun3rd",
+  "Gear Ratio": 1.853,
+  "ID": "c1b6e18sssss8",
+  "Version": "1.0.0",
+
+  "Mode": "Ramp",
+  "Start": "2000",
+  "End": "6000",
+  "Rate": "750",
+  "StopMode": "Hold"
+}
